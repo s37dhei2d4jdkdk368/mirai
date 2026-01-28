@@ -68,10 +68,10 @@ static uint8_t encryption_nonce[12] = {0};
 
 
 
-#define SERVER_AUTH_MAGIC_0  0x4A
-#define SERVER_AUTH_MAGIC_1  0x8F
-#define SERVER_AUTH_MAGIC_2  0x2C
-#define SERVER_AUTH_MAGIC_3  0xD1
+#define SERVER_AUTH_MAGIC_0  0x71
+#define SERVER_AUTH_MAGIC_1  0xBF
+#define SERVER_AUTH_MAGIC_2  0x9A
+#define SERVER_AUTH_MAGIC_3  0x38
 
 
 
