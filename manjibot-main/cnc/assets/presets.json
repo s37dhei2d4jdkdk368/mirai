@@ -1,0 +1,50 @@
+[
+  {
+    "preset": "day",
+    "description": "One day plan with the default settings",
+    "maxBots": -1,
+    "duration": 60,
+    "cooldown": 100,
+    "userMaxAttacks": 100,
+    "expiry": "1d",
+    "isAdmin": false,
+    "isReseller": false,
+    "isVip": false
+  },
+  {
+    "preset": "week",
+    "description": "One week plan with the default settings",
+    "maxBots": -1,
+    "duration": 60,
+    "cooldown": 100,
+    "userMaxAttacks": 100,
+    "expiry": "7d",
+    "isAdmin": false,
+    "isReseller": false,
+    "isVip": false
+  },
+  {
+    "preset": "month",
+    "description": "One month plan with the default settings",
+    "maxBots": -1,
+    "duration": 60,
+    "cooldown": 100,
+    "userMaxAttacks": 100,
+    "expiry": "30d",
+    "isAdmin": false,
+    "isReseller": false,
+    "isVip": false
+  },
+  {
+    "preset": "seller",
+    "description": "preset for adding a new seller",
+    "maxBots": -1,
+    "duration": 60,
+    "cooldown": 100,
+    "userMaxAttacks": 100,
+    "expiry": "90d",
+    "isAdmin": false,
+    "isReseller": true,
+    "isVip": true
+  }
+]
