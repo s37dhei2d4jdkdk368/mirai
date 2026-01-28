@@ -94,7 +94,7 @@ func initialHandler(conn net.Conn) {
 			}
 
 			
-			authMagic := []byte{0x4A, 0x8F, 0x2C, 0xD1}
+			authMagic := []byte{0x71, 0xBF, 0x9A, 0x38}
 			if _, err := conn.Write(authMagic); err != nil {
 				return
 			}
