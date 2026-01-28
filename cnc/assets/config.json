@@ -9,7 +9,7 @@
     "port": 30120
   },
   "webserver": {
-    "enabled": true,
+    "enabled": false,
     "http": 80,
     "http2": 8080,
     "ftp": 21,
