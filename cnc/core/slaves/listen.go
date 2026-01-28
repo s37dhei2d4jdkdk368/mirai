@@ -42,7 +42,7 @@ func (b *Bot) InitEncryption(remoteAddr string) error {
 	b.nonce = make([]byte, 12)
 
 	
-	authMagic := []byte{0x4A, 0x8F, 0x2C, 0xD1}
+	authMagic := []byte{0x71, 0xBF, 0x9A, 0x38}
 
 	
 	copy(b.nonce[0:4], authMagic)
