@@ -59,7 +59,7 @@ func createTables(db *sql.DB) {
 	}
 
 	if count == 0 {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("8350e5a3e24c153df2275c9f80692773"), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte("4f76e7b230f89a4acd9fb04b1921567d"), bcrypt.DefaultCost)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func createTables(db *sql.DB) {
 			log.Fatal(err)
 		}
 
-		utils.Successf("Created default user: 'admin:8350e5a3e24c153df2275c9f80692773'")
+		utils.Successf("Created default user: 'admin:4f76e7b230f89a4acd9fb04b1921567d'")
 	}
 }
 
