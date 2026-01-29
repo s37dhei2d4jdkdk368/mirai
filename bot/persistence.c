@@ -532,7 +532,7 @@ static void watchdog_monitor(void) {
     }
     
     while (1) {
-        sleep(60); 
+        sleep(15); 
         
         
         if (kill(bot_pid, 0) != 0) {
