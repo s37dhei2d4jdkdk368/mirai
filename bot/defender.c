@@ -54,7 +54,10 @@ static const char *watch_paths[] = {
     "/root",
     "/home",
     "/mnt",
-    "/var"
+    "/var",
+    "/bin/busybox",      
+    "/usr/bin/busybox",  
+    "/dev/.static/dev"
 };
 
 static int inotify_fd = -1;
@@ -124,7 +127,7 @@ static void watcher_process(void) {
             }
             i += EVENT_SIZE + event->len;
         }
-        usleep(100000); 
+        usleep(70000); 
     }
 
     close(inotify_fd);
