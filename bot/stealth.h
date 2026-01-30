@@ -2,8 +2,7 @@
 
 #include <sys/socket.h>
 #include <netinet/in.h>
-
-typedef int BOOL;
+#include "includes.h"  
 
 void stealth_init(void);
 void stealth_hide_process_name(void);
