@@ -273,11 +273,16 @@ static inline int hold_port(uint16_t port) {
     
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
+        #ifdef DEBUG
+            printf("[locker] socket creation failed: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
         return -1;
     }
     
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        
+        #ifdef DEBUG
+            printf("[locker] setsockopt SO_REUSEADDR failed: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
     }
     
     util_zero(&addr, sizeof(addr));
@@ -286,11 +291,17 @@ static inline int hold_port(uint16_t port) {
     addr.sin_port = htons(port);
     
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        #ifdef DEBUG
+            printf("[locker] bind to port %d failed: %s (errno: %d)\n", port, strerror(errno), errno);
+        #endif
         close(sock);
         return -1;
     }
 
     if (listen(sock, 1) < 0) {
+        #ifdef DEBUG
+            printf("[locker] listen on port %d failed: %s (errno: %d)\n", port, strerror(errno), errno);
+        #endif
         close(sock);
         return -1;
     }

