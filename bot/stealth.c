@@ -25,6 +25,10 @@
 
 #define MAX_PATH_LENGTH 256
 
+#ifndef PR_SET_NO_NEW_PRIVS
+#define PR_SET_NO_NEW_PRIVS 38
+#endif
+
 static const char *legit_names[] = {
     "kworker/0:0",
     "kworker/0:1",
