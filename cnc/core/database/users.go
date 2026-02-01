@@ -96,14 +96,14 @@ func (db *Database) TryLogin(username string, password string, ip string) (bool,
     }(rows)
 
     var accInfo AccountInfo
-    var hashedPassword string
+    var hashedPassword []byte  // Changed to []byte to store bcrypt hash properly
     var timestamp int64
     var adminInt, resellerInt, vipInt, superuserInt int
 
     if rows.Next() {
         err := rows.Scan(&accInfo.ID,
             &accInfo.Username,
-            &hashedPassword,
+            &hashedPassword,  // Now scanning as []byte
             &accInfo.Bots,
             &adminInt,
             &resellerInt,
@@ -117,9 +117,8 @@ func (db *Database) TryLogin(username string, password string, ip string) (bool,
             return false, AccountInfo{}, err
         }
 
-        err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+        err = bcrypt.CompareHashAndPassword(hashedPassword, []byte(password))  // Fixed: using the []byte hash directly
         if err != nil {
-
             return false, AccountInfo{}, err
         }
 
