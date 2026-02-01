@@ -1,1 +1,0 @@
-Broadcasted instruction to [<<$botcount>>] bots.
