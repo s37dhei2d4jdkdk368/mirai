@@ -10,6 +10,7 @@ require (
     github.com/mattn/go-shellwords v1.0.12
     github.com/pin/tftp v2.1.0+incompatible
     github.com/shirou/gopsutil v3.21.11+incompatible
+    golang.org/x/crypto v0.31.0
     modernc.org/sqlite v1.44.2
 )
 
