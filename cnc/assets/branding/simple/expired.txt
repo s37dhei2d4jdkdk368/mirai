@@ -1,0 +1,3 @@
+<<$clear>>Your account has expired.
+Press any key to exit.
+\x1b[0m
