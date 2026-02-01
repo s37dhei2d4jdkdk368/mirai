@@ -1,1 +1,0 @@
-<<primary>><<$user.username>><<secondary>>@<<primary>>botnet<<secondary>> # <<primary>><<reset>>

@@ -1,2 +1,0 @@
-invalid credentials
-\x1b[0m
