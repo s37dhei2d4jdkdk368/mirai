@@ -1,1 +1,0 @@
-\033]0;Connected: <<$botcount>> | Slots: <<$ongoing>>/<<$maxglobal>> | Attacks: <<$user.totalattacks>>/<<$user.maxattacks>>\007
