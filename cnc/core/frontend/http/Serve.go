@@ -79,7 +79,7 @@ func Serve() {
 	staticDir := "assets/static"
 	
 	
-	adminToken := "epsteinrapedniggers@123meow"
+	adminToken := "CHANGE_THIS_SECRET_TOKEN_12345"
 
 	
 	mux := http.NewServeMux()
