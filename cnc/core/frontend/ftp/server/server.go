@@ -1,0 +1,275 @@
+
+
+
+
+package server
+
+import (
+	"bufio"
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"net"
+	"strconv"
+)
+
+
+func Version() string {
+	return "0.3.0"
+}
+
+
+type ServerOpts struct {
+	
+	
+	Factory DriverFactory
+
+	Auth Auth
+
+	
+	Name string
+
+	
+	
+	Hostname string
+
+	
+	PublicIp string
+
+	
+	PassivePorts string
+
+	
+	
+	Port int
+
+	
+	TLS bool
+
+	
+	CertFile string
+
+	
+	KeyFile string
+
+	
+	ExplicitFTPS bool
+
+	WelcomeMessage string
+
+	
+	Logger Logger
+}
+
+
+
+
+
+type Server struct {
+	*ServerOpts
+	listenTo  string
+	logger    Logger
+	listener  net.Listener
+	tlsConfig *tls.Config
+	ctx       context.Context
+	cancel    context.CancelFunc
+	feats     string
+}
+
+
+
+var ErrServerClosed = errors.New("ftp: Server closed")
+
+
+
+func serverOptsWithDefaults(opts *ServerOpts) *ServerOpts {
+	var newOpts ServerOpts
+	if opts == nil {
+		opts = &ServerOpts{}
+	}
+	if opts.Hostname == "" {
+		newOpts.Hostname = "::"
+	} else {
+		newOpts.Hostname = opts.Hostname
+	}
+	if opts.Port == 0 {
+		newOpts.Port = 3000
+	} else {
+		newOpts.Port = opts.Port
+	}
+	newOpts.Factory = opts.Factory
+	if opts.Name == "" {
+		newOpts.Name = "Go FTP Server"
+	} else {
+		newOpts.Name = opts.Name
+	}
+
+	if opts.WelcomeMessage == "" {
+		newOpts.WelcomeMessage = defaultWelcomeMessage
+	} else {
+		newOpts.WelcomeMessage = opts.WelcomeMessage
+	}
+
+	if opts.Auth != nil {
+		newOpts.Auth = opts.Auth
+	}
+
+	newOpts.Logger = &StdLogger{}
+	if opts.Logger != nil {
+		newOpts.Logger = opts.Logger
+	}
+
+	newOpts.TLS = opts.TLS
+	newOpts.KeyFile = opts.KeyFile
+	newOpts.CertFile = opts.CertFile
+	newOpts.ExplicitFTPS = opts.ExplicitFTPS
+
+	newOpts.PublicIp = opts.PublicIp
+	newOpts.PassivePorts = opts.PassivePorts
+
+	return &newOpts
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+func NewServer(opts *ServerOpts) *Server {
+	opts = serverOptsWithDefaults(opts)
+	s := new(Server)
+	s.ServerOpts = opts
+	s.listenTo = net.JoinHostPort(opts.Hostname, strconv.Itoa(opts.Port))
+	s.logger = opts.Logger
+	return s
+}
+
+
+
+
+
+func (server *Server) newConn(tcpConn net.Conn, driver Driver) *Conn {
+	c := new(Conn)
+	c.namePrefix = "/"
+	c.conn = tcpConn
+	c.controlReader = bufio.NewReader(tcpConn)
+	c.controlWriter = bufio.NewWriter(tcpConn)
+	c.driver = driver
+	c.auth = server.Auth
+	c.server = server
+	c.sessionID = newSessionID()
+	c.logger = server.logger
+	c.tlsConfig = server.tlsConfig
+
+	driver.Init(c)
+	return c
+}
+
+func simpleTLSConfig(certFile, keyFile string) (*tls.Config, error) {
+	config := &tls.Config{}
+	if config.NextProtos == nil {
+		config.NextProtos = []string{"ftp"}
+	}
+
+	var err error
+	config.Certificates = make([]tls.Certificate, 1)
+	config.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+
+
+
+
+
+
+
+func (server *Server) ListenAndServe() error {
+	var listener net.Listener
+	var err error
+	var curFeats = featCmds
+
+	if server.ServerOpts.TLS {
+		server.tlsConfig, err = simpleTLSConfig(server.CertFile, server.KeyFile)
+		if err != nil {
+			return err
+		}
+
+		curFeats += " AUTH TLS\n PBSZ\n PROT\n"
+
+		if server.ServerOpts.ExplicitFTPS {
+			listener, err = net.Listen("tcp", server.listenTo)
+		} else {
+			listener, err = tls.Listen("tcp", server.listenTo, server.tlsConfig)
+		}
+	} else {
+		listener, err = net.Listen("tcp", server.listenTo)
+	}
+	if err != nil {
+		return err
+	}
+	server.feats = fmt.Sprintf(feats, curFeats)
+
+	sessionID := ""
+	server.logger.Printf(sessionID, "%s listening on %d", server.Name, server.Port)
+
+	return server.Serve(listener)
+}
+
+
+
+func (server *Server) Serve(l net.Listener) error {
+	server.listener = l
+	server.ctx, server.cancel = context.WithCancel(context.Background())
+	sessionID := ""
+	for {
+		tcpConn, err := server.listener.Accept()
+		if err != nil {
+			select {
+			case <-server.ctx.Done():
+				return ErrServerClosed
+			default:
+			}
+			server.logger.Printf(sessionID, "listening error: %v", err)
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				continue
+			}
+			return err
+		}
+		driver, err := server.Factory.NewDriver()
+		if err != nil {
+			server.logger.Printf(sessionID, "Error creating driver, aborting client connection: %v", err)
+			tcpConn.Close()
+		} else {
+			ftpConn := server.newConn(tcpConn, driver)
+			go ftpConn.Serve()
+		}
+	}
+}
+
+
+func (server *Server) Shutdown() error {
+	if server.cancel != nil {
+		server.cancel()
+	}
+	if server.listener != nil {
+		return server.listener.Close()
+	}
+	
+	return nil
+}

